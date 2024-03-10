@@ -48,3 +48,6 @@ if (rtClient.IsLoggedIn() == false)
 		return;
 	}
 }
+
+var meResponse = await rtClient.GetMe();
+Console.WriteLine($"Welcome {meResponse.Attributes.Username}");

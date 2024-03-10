@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using RTArchiver.Data;
 
@@ -61,5 +62,22 @@ public class RTClient
 			Console.WriteLine(err.Message);
 			return false;
 		}
+	}
+
+	async Task<MeResponse?> GetAPIRequest<TResponse>(string url)
+	{
+		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+		{
+			request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? String.Empty);
+			var response = await _httpClient.SendAsync(request);
+			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
+			var responseData = await response.Content.ReadAsStringAsync();
+			return await response.Content.ReadFromJsonAsync<MeResponse>();
+		}
+	}
+
+	public async Task<MeResponse?> GetMe()
+	{
+		return await GetAPIRequest<MeResponse>("https://business-service.roosterteeth.com/api/v1/me");
 	}
 }
