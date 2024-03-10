@@ -49,5 +49,8 @@ if (rtClient.IsLoggedIn() == false)
 	}
 }
 
+var genres = await rtClient.GetGenres();
+//Debugger.Break();
+
 var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse.Attributes.Username}");
