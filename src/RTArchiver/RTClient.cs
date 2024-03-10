@@ -64,11 +64,15 @@ public class RTClient
 		}
 	}
 
-	async Task<MeResponse?> GetAPIRequest<TResponse>(string url)
+	async Task<MeResponse?> GetAPIRequest<TResponse>(string url, bool useAuth = true)
 	{
 		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
 		{
-			request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? String.Empty);
+			if (useAuth == true)
+			{
+				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? String.Empty);
+			}
+
 			var response = await _httpClient.SendAsync(request);
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
 			var responseData = await response.Content.ReadAsStringAsync();
@@ -80,4 +84,14 @@ public class RTClient
 	{
 		return await GetAPIRequest<MeResponse>("https://business-service.roosterteeth.com/api/v1/me");
 	}
+	
+	// TODO: Handle these APIs, set useAuth when its not required 
+	// https://svod-be.roosterteeth.com/api/v1/genres (noauth)
+	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
+	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
+	
+	// Other samples
+	// https://svod-be.roosterteeth.com/api/v1/shows/camp-camp
+	// https://roosterteeth.com/episodes?channel_id=red-vs-blue-universe
+	// https://roosterteeth.com/watch/red-vs-blue-season-4-episode-58
 }
