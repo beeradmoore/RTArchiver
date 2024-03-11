@@ -222,6 +222,11 @@ public class RTClient
 
 		return shows;
 	}
+
+	public async Task<SeasonsResponse?> GetSeasons(string slug)
+	{
+		return await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{slug}/seasons");
+	}
 	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)

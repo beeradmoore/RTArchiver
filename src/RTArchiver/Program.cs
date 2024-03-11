@@ -56,7 +56,12 @@ Console.WriteLine($"Welcome {meResponse.Attributes.Username}");
 var genres = await rtClient.GetGenres();
 if(genres != null)
 {
-	Console.WriteLine(JsonSerializer.Serialize(genres.Data[0]));
+	Console.WriteLine(JsonSerializer.Serialize(genres.Data[0], new JsonSerializerOptions { WriteIndented = true }));
+}
+var seasons = await rtClient.GetSeasons("camp-camp");
+if(seasons != null)
+{
+	Console.WriteLine(JsonSerializer.Serialize(seasons.Data[0], new JsonSerializerOptions { WriteIndented = true}));
 }
 //var channels = await rtClient.GetChannels();
 //var shows = await rtClient.GetShows();
