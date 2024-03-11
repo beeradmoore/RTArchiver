@@ -1,9 +1,12 @@
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
+using RTArchiver.Extensions;
 
 namespace RTArchiver;
 
@@ -144,8 +147,43 @@ public class RTClient
 		}
 	}
 
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order = "asc", bool useAuth = true)
+	/*
+	async Task<TResponse?> GetAllAPIRequest<TResponse>(string url) where TResponse : VideosResponse, BonusFeaturesResponse
 	{
+		var page = 1;
+		TResponse? firstResponse = default(TResponse);
+		TResponse response;
+		do
+		{
+			response = await GetAPIRequest<TResponse>(url, page, 5);
+			if (firstResponse == null)
+			{
+				firstResponse = response;
+			}
+			else
+			{
+				firstResponse.Data.AddRange(response.Data);
+			}
+
+
+			++page;
+		} while (page <= response?.TotalPages);
+		
+
+		return firstResponse;
+	}
+	*/
+
+	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 1000, string order = "asc", bool useAuth = true)
+	{
+		// Some api endpoints are just /api/v1/doStuff, so if one gets past here we add the svod-be address.
+		if (url.StartsWith("/api/v1/"))
+		{
+			url = $"https://svod-be.roosterteeth.com{url}";
+		}
+		
+		var shouldCache = false;
+		
 		if (url.StartsWith("https://svod-be.roosterteeth.com"))
 		{
 			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase))
@@ -158,11 +196,41 @@ public class RTClient
 			}
 
 			url += $"per_page={perPage}&page={page}&order={order}";
+			shouldCache = true;
 		}
 
+		var uri = new Uri(url);
+
+		var requestCacheFile = uri.AbsolutePath;
+		if (requestCacheFile.StartsWith("/"))
+		{
+			requestCacheFile = requestCacheFile.Substring(1);
+		}
+		requestCacheFile += $"_page{page.ToString().PadLeft(2, '0')}.json";
+		
+		var requestCachePath = Path.Combine(_archiveCachePath, requestCacheFile);
+
+		if (shouldCache)
+		{
+			try
+			{
+				if (File.Exists(requestCachePath))
+				{
+					using (var fileStream = File.OpenRead(requestCachePath))
+					{
+						return JsonSerializer.Deserialize<TResponse>(fileStream);
+					}
+				}
+			}
+			catch (Exception err)
+			{
+				Console.WriteLine($"Error: Could not load request from disk, {requestCacheFile}");
+				Console.WriteLine(err.Message);
+			}
+		}
 		//Console.WriteLine(url);
 
-		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+		using (var request = new HttpRequestMessage(HttpMethod.Get, uri))
 		{
 			if (useAuth)
 			{
@@ -173,16 +241,39 @@ public class RTClient
 
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
 
-#if DEBUG
-			// Helps debug a specific endpoint as plaintext.
-			if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
+			using (var responseStream = await response.Content.ReadAsStreamAsync())
 			{
-				var responseData = await response.Content.ReadAsStringAsync();
-				//Debugger.Break();
-			}
+				if (shouldCache)
+				{
+					try
+					{
+						var directory = Path.GetDirectoryName(requestCachePath);
+						if (string.IsNullOrEmpty(directory) == false && Directory.Exists(directory) == false)
+						{
+							Directory.CreateDirectory(directory);
+						}
+						using (var fileStream = File.Create(requestCachePath))
+						{
+							await responseStream.CopyToAsync(fileStream);
+						}
+					}
+					catch (Exception err)
+					{
+						Console.WriteLine($"Error: Could not save request to disk, {requestCacheFile}");
+						Console.WriteLine(err.Message);
+					}
+				}
+#if DEBUG
+				// Helps debug a specific endpoint as plaintext.
+				if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
+				{
+					//Debugger.Break();
+				}
 #endif
 
-			return await response.Content.ReadFromJsonAsync<TResponse>();
+				responseStream.Position = 0;
+				return await JsonSerializer.DeserializeAsync<TResponse>(responseStream);
+			}
 		}
 	}
 
@@ -264,7 +355,7 @@ public class RTClient
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, 100, useAuth: false);
+			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, useAuth: false);
 
 			//Console.WriteLine($"Loaded page {page}, page: {channelsResponse.Page}, perPage: {channelsResponse.PerPage}, totalPages: {channelsResponse.TotalPages}, totalResults: {channelsResponse.TotalResults}");
 			if (channelsResponse != null)
@@ -274,7 +365,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < channelsResponse?.TotalPages);
+		} while (page - 1 < channelsResponse?.TotalPages);
 
 		foreach (var channel in channels)
 		{
@@ -322,7 +413,7 @@ public class RTClient
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page, 100);
+			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page);
 
 			//Console.WriteLine($"Loaded page {page}, page: {showsResponse.Page}, perPage: {showsResponse.PerPage}, totalPages: {showsResponse.TotalPages}, totalResults: {showsResponse.TotalResults}");
 			if (showsResponse != null)
@@ -332,7 +423,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < showsResponse?.TotalPages);
+		} while (page - 1 < showsResponse?.TotalPages);
 
 		foreach (var show in shows)
 		{
@@ -351,17 +442,207 @@ public class RTClient
 		
 		return shows;
 	}
-
-	public async Task<List<Season>> GetSeasons(string slug)
+	
+	
+	public async Task<List<Show>> GetShows(Channel channel)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{slug}/seasons");
+		var shows = new List<Show>();
+		var showsResponse = await GetAPIRequest<ShowsResponse>(channel.Links.Shows);
+		if (showsResponse?.Data != null)
+		{
+			shows.AddRange(showsResponse.Data);
+		}
+		return shows;
+	}
+
+	public async Task<List<Season>> GetSeasons(string showSlug)
+	{
+		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
 		return seasonsResponse?.Data ?? new List<Season>();
 	}
 	
-	public void Download(Channel selectedChannel, Show selectedShow, DownloadOptions? selectDownloadOption)
+	public async Task<List<Season>> GetSeasons(Show show)
 	{
-		//throw new NotImplementedException();
+		var seasonsResponse = await GetAPIRequest<SeasonsResponse>(show.Links.Seasons);
+		return seasonsResponse?.Data ?? new List<Season>();
 	}
+	
+	public async Task<List<BonusFeature>> GetBonusFeatures(string showSlug)
+	{
+		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
+		return bonusFeaturesResponse?.Data ?? new List<BonusFeature>();
+	}
+		
+	public async Task<List<DownloadItem>> GetDownloadItemsForEverything(Channel channel, Show show)
+	{
+		var downloadItems = new List<DownloadItem>();
+		downloadItems.AddRange(await GetDownloadItemsForAllSeasons(channel, show));
+		downloadItems.AddRange(await GetDownloadItemsForAllBonusFeatures(channel, show));
+		return downloadItems;
+	}
+
+	public async Task<List<Episode>> GetEpisodes(Season season)
+	{
+		// TODO: pagination?
+		var episodes = new List<Episode>();
+		var episodeResponse = await GetAPIRequest<EpidsodesResponse>(season.Links.Episodes);
+		if (episodeResponse?.Data != null)
+		{
+			episodes.AddRange(episodeResponse.Data);
+		}
+
+		return episodes;
+	}
+	
+	public async Task<List<Episode>> GetEpisodes(Channel channel)
+	{
+		// TODO: pagination?
+		var episodes = new List<Episode>();
+
+		var page = 1;
+		EpidsodesResponse episodeResponse;
+		do
+		{
+			episodeResponse = await GetAPIRequest<EpidsodesResponse>(channel.Links.Episodes, page: page);
+			if (episodeResponse?.Data != null)
+			{
+				episodes.AddRange(episodeResponse.Data);
+			}
+
+			++page;
+		} while (page - 1 < episodeResponse?.TotalPages);
+		
+		return episodes;
+	}
+	
+	
+	
+	public async Task<List<BonusFeature>> GetBonusFeatures(Show show)
+	{
+		// TODO: pagination?
+		var bonusFeatures = new List<BonusFeature>();
+		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>(show.Links.BonusFeatures);
+		if (bonusFeaturesResponse?.Data != null)
+		{
+			bonusFeatures.AddRange(bonusFeaturesResponse.Data);
+		}
+
+		return bonusFeatures;
+	}
+	
+	public async Task<List<Video>> GetVideos(Episode episode)
+	{
+		// TODO: pagination?
+		var videos = new List<Video>();
+		var videosResponse = await GetAPIRequest<VideosResponse>(episode.Links.Videos);
+		if (videosResponse?.Data != null)
+		{
+			videos.AddRange(videosResponse.Data);
+		}
+
+		return videos;
+	}
+	
+	public async Task<List<Video>> GetVideos(BonusFeature bonusFeature)
+	{
+		// TODO: pagination?
+		var videos = new List<Video>();
+		var videosResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
+		if (videosResponse?.Data != null)
+		{
+			videos.AddRange(videosResponse.Data);
+		}
+
+		return videos;
+	}
+	
+	
+	
+	
+	public async Task<List<DownloadItem>> GetDownloadItemsForAllSeasons(Channel channel, Show show)
+	{
+		var downloadItems = new List<DownloadItem>();
+
+		var seasons = await GetSeasons(show.Slug);
+		foreach (var season in seasons)
+		{
+			var episodes = await GetEpisodes(season);
+			foreach (var episode in episodes)
+			{
+				var videos = await GetVideos(episode);
+				foreach (var video in videos)
+				{
+					downloadItems.Add(new DownloadItem()
+					{
+						RemoteManifestPath = video.Links.Download,
+						LocalPath = episode.FullLocalPath(),
+					});
+				}
+			}
+		}
+		
+		return downloadItems;
+	}
+	
+	
+	public async Task<List<DownloadItem>> GetDownloadItemsForSpecificSeason(Channel channel, Show show, Season season)
+	{
+		var downloadItems = new List<DownloadItem>();
+		
+		var episodes = await GetEpisodes(season);
+		foreach (var episode in episodes)
+		{
+			var videos = await GetVideos(episode);
+			foreach (var video in videos)
+			{
+				downloadItems.Add(new DownloadItem()
+				{
+					RemoteManifestPath = video.Links.Download,
+					LocalPath = episode.FullLocalPath(),
+				});
+			}
+		}
+		
+		return downloadItems;
+	}
+	
+	
+	public async Task<List<DownloadItem>> GetDownloadItemsForAllBonusFeatures(Channel channel, Show show)
+	{
+		var downloadItems = new List<DownloadItem>();
+		
+		var bonusFeatures = await GetBonusFeatures(show);
+		foreach (var bonusFeature in bonusFeatures)
+		{
+			var videos = await GetVideos(bonusFeature);
+			foreach (var video in videos)
+			{
+				downloadItems.Add(new DownloadItem()
+				{
+					RemoteManifestPath = video.Links.Download,
+					LocalPath = bonusFeature.FullLocalPath(show),
+				});
+			}
+		}
+		return downloadItems;
+	}
+	
+	
+	public async Task<List<DownloadItem>> GetDownloadItemsForSpecificBonusFeature(Channel channel, Show show, BonusFeature bonusFeature)
+	{
+		var downloadItems = new List<DownloadItem>();
+		var videos = await GetVideos(bonusFeature);
+		foreach (var video in videos)
+		{
+			downloadItems.Add(new DownloadItem()
+			{
+				RemoteManifestPath = video.Links.Download,
+				LocalPath = bonusFeature.FullLocalPath(show),
+			});
+		}
+		return downloadItems;
+	}
+	
 	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
@@ -373,4 +654,64 @@ public class RTClient
 	// https://roosterteeth.com/episodes?channel_id=red-vs-blue-universe
 	// https://roosterteeth.com/watch/red-vs-blue-season-4-episode-58
 
+	public async Task CacheGoBrrrr()
+	{
+		/*
+		var response = await GetAllAPIRequest<BaseResponse<object>>("https://svod-be.roosterteeth.com/api/v1/shows/camp-camp");
+		Debugger.Break();
+		*/
+		
+		foreach (var channel in Channels.Values)
+		{
+			
+			
+			// Disabled as this is a lot of videos
+			var allEpisodes = await GetEpisodes(channel);
+			foreach (var episode in allEpisodes)
+			{
+				Console.WriteLine($" -> {episode.FileName()}");
+			}
+			
+
+			Console.WriteLine($"Channel: {channel.Name}");
+			Console.WriteLine("Shows:");
+			var shows = await GetShows(channel);
+			foreach (var show in shows)
+			{
+				Console.WriteLine($" -> {show.Attributes.Title}");
+				
+				Console.WriteLine(" Seasons:");
+				var seasons = await GetSeasons(show);
+				foreach (var season in seasons)
+				{
+					Console.WriteLine($"  -> {season.Attributes.Number} - {season.Attributes.Title}");
+					
+					Console.WriteLine("  Episodes:");
+					var episodes = await GetEpisodes(season);
+					foreach (var episode in episodes)
+					{
+						Console.WriteLine($"   -> {episode.FullLocalPath()}");
+						var videos = await GetVideos(episode);
+						Console.WriteLine($"    -> {videos.Count}");
+					}
+				}
+				
+				Console.WriteLine(" Bonus features:");
+				var bonusFeatures = await GetBonusFeatures(show);
+				foreach (var bonusFeature in bonusFeatures)
+				{
+					Console.WriteLine($"  -> {bonusFeature.Attributes.Title}");
+					
+					
+					Console.WriteLine($"   -> {bonusFeature.FullLocalPath(show)}");
+					var videos = await GetVideos(bonusFeature);
+					Console.WriteLine($"    -> {videos.Count}");
+					
+					//bonusFeature.Links.Videos
+				}
+			}
+			
+		}
+		
+	}
 }

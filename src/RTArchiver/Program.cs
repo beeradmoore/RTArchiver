@@ -112,6 +112,9 @@ if (rtClient.IsLoggedIn() == false)
 var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse?.Attributes.Username}");
 
+
+
+
 Console.WriteLine("\nLoading genres");
 var genres = await rtClient.GetGenres();
 Console.WriteLine($"Found: {genres.Count}");
@@ -143,6 +146,9 @@ if (shows.Count > 0)
 	Console.WriteLine(JsonSerializer.Serialize(shows[0], new JsonSerializerOptions { WriteIndented = true }));
 }
 */
+
+
+//await rtClient.CacheGoBrrrr();
 
 Channel? SelectChannel()
 {
@@ -250,8 +256,8 @@ DownloadOptions? SelectDownloadOption(Channel channel, Show show)
 					1 => RTArchiver.Data.DownloadOptions.Everything,
 					2 => RTArchiver.Data.DownloadOptions.AllSeasons,
 					3 => RTArchiver.Data.DownloadOptions.SpecificSeason,
-					4 => RTArchiver.Data.DownloadOptions.AllBehindTheScenes,
-					5 => RTArchiver.Data.DownloadOptions.SpecificBehindTheScenes,
+					4 => RTArchiver.Data.DownloadOptions.AllBonusFeatures,
+					5 => RTArchiver.Data.DownloadOptions.SpecificBonusFeature,
 					_ => null, // this should never happen.
 				};
 			}
@@ -259,6 +265,87 @@ DownloadOptions? SelectDownloadOption(Channel channel, Show show)
 	} while (true);
 }
 
+
+
+async Task<Season?> SelectSeason(Show show)
+{
+	var seasons = await rtClient.GetSeasons(show.Slug);
+	seasons.Sort((a, b) => a.Attributes.Number.CompareTo(b.Attributes.Number));
+	
+	do
+	{
+		Console.WriteLine("\n\n");
+		
+		for (var i = 0; i < seasons.Count; ++i)
+		{
+			Console.WriteLine($"{i+1}. {seasons[i].Attributes.Title}");
+		}
+
+		Console.WriteLine("b. Back");
+		Console.WriteLine("q. Quit");
+		
+		Console.Write("Select season: ");
+		var seasonSelected = Console.ReadLine()?.Trim() ?? string.Empty;
+
+		if (string.Equals(seasonSelected, "q", StringComparison.OrdinalIgnoreCase))
+		{
+			Environment.Exit(0);
+		}
+		else if (string.Equals(seasonSelected, "b", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+		else if (int.TryParse(seasonSelected, out int seasonNumber) == true)
+		{
+			seasonNumber -= 1;
+			if (seasonNumber >= 0 && seasonNumber < seasons.Count)
+			{
+				return seasons[seasonNumber];
+			}
+		}
+	} while (true);
+}
+
+
+
+async Task<BonusFeature?> SelectBonusFeature(Show show)
+{
+	var bonusFeatures = await rtClient.GetBonusFeatures(show.Slug);
+	bonusFeatures.Sort((a, b) => a.Attributes.Number.CompareTo(b.Attributes.Number));
+	
+	do
+	{
+		Console.WriteLine("\n\n");
+		
+		for (var i = 0; i < bonusFeatures.Count; ++i)
+		{
+			Console.WriteLine($"{i+1}. {bonusFeatures[i].Attributes.Title}");
+		}
+
+		Console.WriteLine(" b. Back");
+		Console.WriteLine(" q. Quit");
+		
+		Console.Write("Select bonus feature: ");
+		var selectedBonusFeature = Console.ReadLine()?.Trim() ?? string.Empty;
+
+		if (string.Equals(selectedBonusFeature, "q", StringComparison.OrdinalIgnoreCase))
+		{
+			Environment.Exit(0);
+		}
+		else if (string.Equals(selectedBonusFeature, "b", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+		else if (int.TryParse(selectedBonusFeature, out int bonusFeatureNumber) == true)
+		{
+			bonusFeatureNumber -= 1;
+			if (bonusFeatureNumber >= 0 && bonusFeatureNumber < bonusFeatures.Count)
+			{
+				return bonusFeatures[bonusFeatureNumber];
+			}
+		}
+	} while (true);
+}
 
 while (true)
 {
@@ -274,14 +361,115 @@ while (true)
 		continue;
 	}
 	
-	var selectDownloadOption = SelectDownloadOption(selectedChannel, selectedShow);
-	if (selectDownloadOption == null)
+	var selectedDownloadOption = SelectDownloadOption(selectedChannel, selectedShow);
+	if (selectedDownloadOption == null)
 	{
 		// Technically this takes you back to the first option.
 		continue;
 	}
+
+	var downloadItems = new List<DownloadItem>();
+
+	if (selectedDownloadOption == DownloadOptions.Everything)
+	{
+		var newDownloadItems = await rtClient.GetDownloadItemsForEverything(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
+	}
+	else if (selectedDownloadOption == DownloadOptions.AllSeasons)
+	{
+		var newDownloadItems = await rtClient.GetDownloadItemsForAllSeasons(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
+	}
+	else if (selectedDownloadOption == DownloadOptions.SpecificSeason)
+	{
+		var selectedSeason = await SelectSeason(selectedShow);
+		if (selectedSeason == null)
+		{
+			// This isn't really back, this is start again.
+			continue;
+		}
+		var newDownloadItems = await rtClient.GetDownloadItemsForSpecificSeason(selectedChannel, selectedShow, selectedSeason);
+		downloadItems.AddRange(newDownloadItems);
+	}
+	else if (selectedDownloadOption == DownloadOptions.AllBonusFeatures)
+	{	
+		var newDownloadItems = await rtClient.GetDownloadItemsForAllBonusFeatures(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
+	}
+	else if (selectedDownloadOption == DownloadOptions.SpecificBonusFeature)
+	{
+		var selectedBonusFeature = await SelectBonusFeature(selectedShow);
+		if (selectedBonusFeature == null)
+		{
+			// This isn't really back, this is start again.
+			continue;
+		}
+		var newDownloadItems = await rtClient.GetDownloadItemsForSpecificBonusFeature(selectedChannel, selectedShow, selectedBonusFeature);
+		downloadItems.AddRange(newDownloadItems);
+	}
+
+	if (downloadItems.Count > 0)
+	{
+		var tempPath = Path.Combine(Path.GetTempPath(), "rt_archive");
+		if (Directory.Exists(tempPath) == false)
+		{
+			Directory.CreateDirectory(tempPath);
+		}
+		
+		Console.WriteLine($"Downloading {downloadItems.Count} items.");
+		var lockObject = new Object();
+
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = 4,
+		};
+		await Parallel.ForEachAsync(downloadItems, async (downloadItem, token) =>
+		{
+			if (File.Exists(downloadItem.LocalPath))
+			{
+				Console.WriteLine($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
+				return;
+			}
+			
+			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
+			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
+			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
+			
+			try
+			{
+				var processResults = await ProcessEx.RunAsync("yt-dlp", $"-o \"{tempFile}\" --no-progress  --merge-output-format mkv --embed-subs --sub-langs all --write-description --write-info-json --write-thumbnail \"{downloadItem.RemoteManifestPath}\"");
+				if (processResults.ExitCode != 0)
+				{
+					throw new Exception("Download did not complete.");
+				}
+
+				lock (lockObject)
+				{
+					var targetDirectory = Path.GetDirectoryName(downloadItem.LocalPath);
+					if (String.IsNullOrEmpty(targetDirectory) == false && Directory.Exists(targetDirectory) == false)
+					{
+						Directory.CreateDirectory(targetDirectory);
+					}
+					
+					// Our temp file gets mkv added to it, so we need to add that to copy it.
+					File.Move(tempFile + ".mkv", downloadItem.LocalPath);
+				}
+
+				//Debugger.Break();
+			}
+			catch (Exception err)
+			{
+				Console.WriteLine($"Error: {err.Message}");
+				//Debugger.Break();
+			}
+		});
+	}
+	else
+	{
+		Console.WriteLine("Could not find anything to download.");
+	}
 	
-	rtClient.Download(selectedChannel, selectedShow, selectDownloadOption);
+
 	
 	Debugger.Break();
 }
