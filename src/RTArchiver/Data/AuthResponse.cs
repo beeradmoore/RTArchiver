@@ -84,6 +84,12 @@ public class AuthResponse
 		}
 	}
 	
-	
+	public static void Delete()
+	{
+		if(File.Exists("auth.json"))
+		{
+			File.Delete("auth.json");
+		}
+	}
 	
 }

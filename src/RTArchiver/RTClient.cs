@@ -44,7 +44,8 @@ public class RTClient
 			if (authResponse == null)
 			{
 				Console.WriteLine("Error: Could not get a valid response from the server.");
-				return false;
+                Logout();
+                return false;
 			}
 
 			if (String.IsNullOrEmpty(authResponse.Error) == false)
@@ -52,7 +53,8 @@ public class RTClient
 				Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
 				Console.WriteLine(authResponse.ErrorDescription);
 				Console.WriteLine(authResponse.ExtraInfo);
-				return false;
+                Logout();
+                return false;
 			}
 
 			_authResponse = authResponse;
@@ -63,9 +65,50 @@ public class RTClient
 		{
 			Console.WriteLine($"Error: Could not log in.");
 			Console.WriteLine(err.Message);
+			Logout();
 			return false;
 		}
 	}
+
+	public void Logout()
+	{
+		AuthResponse.Delete();
+		_authResponse = null;
+	}
+
+	public async Task<bool> RefreshToken()
+	{
+		var refreshRequest = new RefreshRequest() { RefreshToken = _authResponse?.RefreshToken ?? String.Empty };
+		try
+		{
+			var response = await _httpClient.PostAsJsonAsync("https://auth.roosterteeth.com/oauth/token", refreshRequest);
+            var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
+            if (authResponse == null)
+            {
+                Console.WriteLine("Error: Could not get a valid response from the server.");
+				Logout();
+                return false;
+            }
+            if (String.IsNullOrEmpty(authResponse.Error) == false)
+            {
+                Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
+                Console.WriteLine(authResponse.ErrorDescription);
+                Console.WriteLine(authResponse.ExtraInfo);
+                Logout();
+                return false;
+            }
+            _authResponse = authResponse;
+            _authResponse.Save();
+            return true;
+        }
+        catch (Exception err)
+        {
+            Console.WriteLine($"Error: Could not log in.");
+            Console.WriteLine(err.Message);
+			Logout();
+            return false;
+        }
+    }
 
 	async Task<TResponse?> GetAPIRequest<TResponse>(string url, bool useAuth = true)
 	{
