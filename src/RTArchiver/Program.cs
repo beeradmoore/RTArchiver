@@ -420,6 +420,12 @@ while (true)
 		var lockObject = new Object();
 		foreach (var downloadItem in downloadItems)
 		{
+			if (File.Exists(downloadItem.LocalPath))
+			{
+				Console.WriteLine($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
+				continue;
+			}
+			15
 			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
 			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
 			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
