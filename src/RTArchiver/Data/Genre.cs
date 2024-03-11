@@ -14,7 +14,7 @@ public class Genre
 	public Genre_Attributes Attributes { get; set; } = new Genre_Attributes();
 
 	[JsonPropertyName("links")]
-	public Dictionary<string, string> Links { get; set; } = new Dictionary<string, string>();
+	public Genre_Links Links { get; set; } = new Genre_Links();
 
 	[JsonPropertyName("uuid")]
 	public string Uuid { get; set; } = string.Empty;
@@ -37,4 +37,10 @@ public class Genre_Attributes
 
 	[JsonPropertyName("slug")]
 	public string Slug { get; set; } = string.Empty;
+}
+
+public class Genre_Links
+{
+	[JsonPropertyName("self")]
+	public string Self { get; set; } = string.Empty;
 }

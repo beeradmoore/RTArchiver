@@ -189,8 +189,7 @@ public class RTClient
 		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows");
 		return showsResponse;
 	}
-
-
+	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
