@@ -10,8 +10,33 @@ public class RTClient
 	HttpClient _httpClient = new HttpClient();
 	AuthResponse? _authResponse = null;
 
+	public static string ArchivePath = "archive";
+
 	public List<Genre> Genres { get; } = new List<Genre>();
 
+	static RTClient()
+	{
+		var rtArchivePath = Environment.GetEnvironmentVariable("RT_ARCHIVE_PATH");
+		if (String.IsNullOrEmpty(rtArchivePath) == false)
+		{
+			ArchivePath = rtArchivePath;
+		}
+
+		try
+		{
+			if (Directory.Exists(ArchivePath) == false)
+			{
+				Directory.CreateDirectory(ArchivePath);
+			}
+		}
+		catch (Exception err)
+		{
+			Console.WriteLine($"Error: Could not create ArchivePath {ArchivePath}");
+			Console.WriteLine(err.Message);
+			Environment.Exit(1);
+		}
+	}
+	
 	public RTClient()
 	{
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
