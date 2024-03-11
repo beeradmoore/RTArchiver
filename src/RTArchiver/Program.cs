@@ -54,6 +54,14 @@ if (rtClient.IsLoggedIn() == false)
 var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse.Attributes.Username}");
 
+Console.WriteLine("\nLoading channels");
+var channels = await rtClient.GetChannels();
+Console.WriteLine($"Found: {channels.Count}");
+if (channels.Count > 0)
+{
+	Console.WriteLine(JsonSerializer.Serialize(channels[0], new JsonSerializerOptions { WriteIndented = true }));
+}
+
 Console.WriteLine("\nLoading genres");
 var genres = await rtClient.GetGenres();
 Console.WriteLine($"Found: {genres.Count}");
@@ -72,13 +80,13 @@ if (seasons.Count > 0)
 //var channels = await rtClient.GetChannels();
 //var shows = await rtClient.GetShows();
 
-Console.WriteLine("\nLoading channels");
-var channels = await rtClient.GetChannels();
-Console.WriteLine($"Found: {channels.Count}");
-
 Console.WriteLine("\nLoading shows");
 var shows = await rtClient.GetShows();
 Console.WriteLine($"Found: {shows.Count}");
+if(shows.Count > 0)
+{
+	Console.WriteLine(JsonSerializer.Serialize(shows[0], new JsonSerializerOptions { WriteIndented = true }));
+}
 
 
 Debugger.Break();
