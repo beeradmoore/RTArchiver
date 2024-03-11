@@ -280,9 +280,10 @@ public class RTClient
 		return shows;
 	}
 
-	public async Task<SeasonsResponse?> GetSeasons(string slug)
+	public async Task<List<Season>> GetSeasons(string slug)
 	{
-		return await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{slug}/seasons");
+		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{slug}/seasons");
+		return seasonsResponse?.Data ?? new List<Season>();
 	}
 	
 	// TODO: Handle these APIs, set useAuth when its not required 
