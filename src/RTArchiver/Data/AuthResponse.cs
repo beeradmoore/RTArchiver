@@ -37,7 +37,10 @@ public class AuthResponse
 
 	[JsonPropertyName("extra_info")]
 	public string ExtraInfo { get; set; } = String.Empty;
-
+	public static string AuthFile()
+	{
+        return Path.Combine(RTClient.ArchivePath, "auth.json");
+    }
 	public void Save()
 	{
 		if (String.IsNullOrEmpty(AccessToken) == true || String.IsNullOrEmpty(RefreshToken) == true)
@@ -48,8 +51,7 @@ public class AuthResponse
 
 		try
 		{
-			var authFile = Path.Combine(RTClient.ArchivePath, "auth.json");
-			using (var fileStream = File.Create(authFile))
+			using (var fileStream = File.Create(AuthFile()))
 			{
 				JsonSerializer.Serialize(fileStream, this, new JsonSerializerOptions() { WriteIndented = true } );
 			}
@@ -63,8 +65,9 @@ public class AuthResponse
 
 	public static AuthResponse? Load()
 	{
-		var authFile = Path.Combine(RTClient.ArchivePath, "auth.json");
-		if (File.Exists(authFile) == false)
+		var authFile = AuthFile();
+
+        if (File.Exists(authFile) == false)
 		{
 			return null;
 		}
@@ -87,9 +90,11 @@ public class AuthResponse
 	
 	public static void Delete()
 	{
-		if(File.Exists("auth.json"))
+		var authFile = AuthFile();
+
+        if (File.Exists(authFile))
 		{
-			File.Delete("auth.json");
+			File.Delete(authFile);
 		}
 	}
 	
