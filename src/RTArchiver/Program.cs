@@ -418,14 +418,19 @@ while (true)
 		
 		Console.WriteLine($"Downloading {downloadItems.Count} items.");
 		var lockObject = new Object();
-		foreach (var downloadItem in downloadItems)
+
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = 4,
+		};
+		await Parallel.ForEachAsync(downloadItems, async (downloadItem, token) =>
 		{
 			if (File.Exists(downloadItem.LocalPath))
 			{
 				Console.WriteLine($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
-				continue;
+				return;
 			}
-			15
+			
 			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
 			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
 			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
@@ -450,14 +455,14 @@ while (true)
 					File.Move(tempFile + ".mkv", downloadItem.LocalPath);
 				}
 
-				Debugger.Break();
+				//Debugger.Break();
 			}
 			catch (Exception err)
 			{
 				Console.WriteLine($"Error: {err.Message}");
-				Debugger.Break();
+				//Debugger.Break();
 			}
-		}
+		});
 	}
 	else
 	{

@@ -365,7 +365,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < channelsResponse?.TotalPages);
+		} while (page - 1 < channelsResponse?.TotalPages);
 
 		foreach (var channel in channels)
 		{
@@ -423,7 +423,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < showsResponse?.TotalPages);
+		} while (page - 1 < showsResponse?.TotalPages);
 
 		foreach (var show in shows)
 		{
@@ -494,7 +494,6 @@ public class RTClient
 		return episodes;
 	}
 	
-	
 	public async Task<List<Episode>> GetEpisodes(Channel channel)
 	{
 		// TODO: pagination?
@@ -511,7 +510,7 @@ public class RTClient
 			}
 
 			++page;
-		} while (page < episodeResponse?.TotalPages);
+		} while (page - 1 < episodeResponse?.TotalPages);
 		
 		return episodes;
 	}
