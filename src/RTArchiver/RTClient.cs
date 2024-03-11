@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using RTArchiver.Data;
+using RTArchiver.Data.Requests;
+using RTArchiver.Data.Responses;
 
 namespace RTArchiver;
 

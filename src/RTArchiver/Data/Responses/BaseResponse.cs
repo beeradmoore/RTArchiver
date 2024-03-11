@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 
-namespace RTArchiver.Data;
+namespace RTArchiver.Data.Responses;
 
-public class BaseDataResponse<T>
+public class BaseResponse<T>
 {
 	[JsonPropertyName("data")]
 	public T[] Data { get; set; }

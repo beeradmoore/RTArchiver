@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace RTArchiver.Data;
+namespace RTArchiver.Data.Responses;
 
 public class MeResponse
 {

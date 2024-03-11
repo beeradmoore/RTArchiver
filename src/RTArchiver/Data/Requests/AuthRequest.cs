@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace RTArchiver.Data;
+namespace RTArchiver.Data.Requests;
 
 public class AuthRequest
 {

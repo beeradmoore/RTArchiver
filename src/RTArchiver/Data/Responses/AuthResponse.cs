@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace RTArchiver.Data;
+namespace RTArchiver.Data.Responses;
 
 public class AuthResponse
 {
