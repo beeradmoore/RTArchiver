@@ -12,10 +12,10 @@ public class AuthRequest
 
 	[JsonPropertyName("scope")]
 	public string Scope => "user public";
-	
+
 	[JsonPropertyName("username")]
-	public string Username { get; set; } = String.Empty;
-	
+	public string Username { get; set; } = string.Empty;
+
 	[JsonPropertyName("password")]
-	public string Password { get; set; } = String.Empty;
+	public string Password { get; set; } = string.Empty;
 }

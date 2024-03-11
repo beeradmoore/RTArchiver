@@ -9,17 +9,14 @@ namespace RTArchiver;
 
 public class RTClient
 {
-	HttpClient _httpClient = new HttpClient();
-	AuthResponse? _authResponse = null;
-
 	public static string ArchivePath = "archive";
-
-	public List<Genre> Genres { get; } = new List<Genre>();
+	readonly HttpClient _httpClient = new HttpClient();
+	AuthResponse? _authResponse;
 
 	static RTClient()
 	{
 		var rtArchivePath = Environment.GetEnvironmentVariable("RT_ARCHIVE_PATH");
-		if (String.IsNullOrEmpty(rtArchivePath) == false)
+		if (string.IsNullOrEmpty(rtArchivePath) == false)
 		{
 			ArchivePath = rtArchivePath;
 		}
@@ -38,7 +35,7 @@ public class RTClient
 			Environment.Exit(1);
 		}
 	}
-	
+
 	public RTClient()
 	{
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
@@ -51,19 +48,17 @@ public class RTClient
 		}
 	}
 
+	public List<Genre> Genres { get; } = new List<Genre>();
+
 	public bool IsLoggedIn()
 	{
-		return (_authResponse is not null);
+		return _authResponse is not null;
 	}
 
 	public async Task<bool> Login(string username, string password)
 	{
-		var authRequest = new AuthRequest()
-		{
-			Username = username,
-			Password = password,
-		};
-		
+		var authRequest = new AuthRequest { Username = username, Password = password };
+
 		try
 		{
 			var response = await _httpClient.PostAsJsonAsync("https://auth.roosterteeth.com/oauth/token", authRequest);
@@ -71,17 +66,17 @@ public class RTClient
 			if (authResponse == null)
 			{
 				Console.WriteLine("Error: Could not get a valid response from the server.");
-                Logout();
-                return false;
+				Logout();
+				return false;
 			}
 
-			if (String.IsNullOrEmpty(authResponse.Error) == false)
+			if (string.IsNullOrEmpty(authResponse.Error) == false)
 			{
 				Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
 				Console.WriteLine(authResponse.ErrorDescription);
 				Console.WriteLine(authResponse.ExtraInfo);
-                Logout();
-                return false;
+				Logout();
+				return false;
 			}
 
 			_authResponse = authResponse;
@@ -90,7 +85,7 @@ public class RTClient
 		}
 		catch (Exception err)
 		{
-			Console.WriteLine($"Error: Could not log in.");
+			Console.WriteLine("Error: Could not log in.");
 			Console.WriteLine(err.Message);
 			Logout();
 			return false;
@@ -105,60 +100,62 @@ public class RTClient
 
 	public async Task<bool> RefreshToken()
 	{
-		var refreshRequest = new RefreshRequest() { RefreshToken = _authResponse?.RefreshToken ?? String.Empty };
+		var refreshRequest = new RefreshRequest { RefreshToken = _authResponse?.RefreshToken ?? string.Empty };
 		try
 		{
 			var response = await _httpClient.PostAsJsonAsync("https://auth.roosterteeth.com/oauth/token", refreshRequest);
-            var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
-            if (authResponse == null)
-            {
-                Console.WriteLine("Error: Could not get a valid response from the server.");
+			var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
+			if (authResponse == null)
+			{
+				Console.WriteLine("Error: Could not get a valid response from the server.");
 				Logout();
-                return false;
-            }
-            if (String.IsNullOrEmpty(authResponse.Error) == false)
-            {
-                Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
-                Console.WriteLine(authResponse.ErrorDescription);
-                Console.WriteLine(authResponse.ExtraInfo);
-                Logout();
-                return false;
-            }
-            _authResponse = authResponse;
-            _authResponse.Save();
-            return true;
-        }
-        catch (Exception err)
-        {
-            Console.WriteLine($"Error: Could not log in.");
-            Console.WriteLine(err.Message);
+				return false;
+			}
+
+			if (string.IsNullOrEmpty(authResponse.Error) == false)
+			{
+				Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
+				Console.WriteLine(authResponse.ErrorDescription);
+				Console.WriteLine(authResponse.ExtraInfo);
+				Logout();
+				return false;
+			}
+
+			_authResponse = authResponse;
+			_authResponse.Save();
+			return true;
+		}
+		catch (Exception err)
+		{
+			Console.WriteLine("Error: Could not log in.");
+			Console.WriteLine(err.Message);
 			Logout();
-            return false;
-        }
-    }
+			return false;
+		}
+	}
 
 	async Task<TResponse?> GetAPIRequest<TResponse>(string url, bool useAuth = true)
 	{
 		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
 		{
-			if (useAuth == true)
+			if (useAuth)
 			{
-				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? String.Empty);
+				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? string.Empty);
 			}
 
 			var response = await _httpClient.SendAsync(request);
 
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
-			
-			#if DEBUG
+
+#if DEBUG
 			// Helps debug a specific endpoint as plaintext.
-			if (url.Contains("shows"))
+			if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
 			{
 				var responseData = await response.Content.ReadAsStringAsync();
 				Debugger.Break();
 			}
-			#endif
-		
+#endif
+
 			return await response.Content.ReadFromJsonAsync<TResponse>();
 		}
 	}
@@ -180,24 +177,24 @@ public class RTClient
 
 		return genresResponse;
 	}
-	
+
 	public async Task<ChannelsResponse?> GetChannels()
 	{
 		var channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", false);
 		return channelsResponse;
 	}
-	
+
 	public async Task<ShowsResponse?> GetShows()
 	{
 		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows");
 		return showsResponse;
 	}
-	
-	
+
+
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
-	
+
 	// Other samples
 	// https://svod-be.roosterteeth.com/api/v1/shows/camp-camp
 	// Some of these have bonus features in it as well, we should expose those.

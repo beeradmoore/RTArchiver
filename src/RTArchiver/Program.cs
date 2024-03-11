@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using RTArchiver;
+﻿using RTArchiver;
 
 var rtClient = new RTClient();
 
@@ -7,13 +6,13 @@ var rtClient = new RTClient();
 if (rtClient.IsLoggedIn() == false)
 {
 	Console.WriteLine("Please to your roosterteeth.com account");
-	
+
 	Console.Write("Username: ");
-	var username = Console.ReadLine() ?? String.Empty;
-	
+	var username = Console.ReadLine() ?? string.Empty;
+
 	// Get the password but hide the text.
 	Console.Write("Password: ");
-	var password = String.Empty;
+	var password = string.Empty;
 	while (true)
 	{
 		var consoleKeyInfo = Console.ReadKey(true);
@@ -21,7 +20,8 @@ if (rtClient.IsLoggedIn() == false)
 		{
 			break;
 		}
-		else if (consoleKeyInfo.Key == ConsoleKey.Backspace)
+
+		if (consoleKeyInfo.Key == ConsoleKey.Backspace)
 		{
 			if (password.Length > 0)
 			{
@@ -30,17 +30,17 @@ if (rtClient.IsLoggedIn() == false)
 		}
 		else if (char.IsControl(consoleKeyInfo.KeyChar) == false)
 		{
-			password += (char)consoleKeyInfo.KeyChar;
+			password += consoleKeyInfo.KeyChar;
 		}
-		
+
 		// Draw password placeholder.
 		Console.SetCursorPosition(0, Console.CursorTop);
-		Console.Write(new String(' ', Console.BufferWidth));
+		Console.Write(new string(' ', Console.BufferWidth));
 		Console.SetCursorPosition(0, Console.CursorTop);
 		Console.Write("Password: ");
-		Console.Write(String.Empty.PadLeft(password.Length, '*'));
+		Console.Write(string.Empty.PadLeft(password.Length, '*'));
 	}
-	
+
 	// Login with the new details.
 	var didLogin = await rtClient.Login(username, password);
 	if (didLogin == false)
@@ -57,4 +57,3 @@ var genres = await rtClient.GetGenres();
 var shows = await rtClient.GetShows();
 
 //Debugger.Break();
-

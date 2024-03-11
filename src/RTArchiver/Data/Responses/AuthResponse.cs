@@ -6,20 +6,20 @@ namespace RTArchiver.Data.Responses;
 public class AuthResponse
 {
 	[JsonPropertyName("access_token")]
-	public string AccessToken { get; set; } = String.Empty;
+	public string AccessToken { get; set; } = string.Empty;
 
 	[JsonPropertyName("token_type")]
-	public string TokenType { get; set; } = String.Empty;
+	public string TokenType { get; set; } = string.Empty;
 
 	[JsonPropertyName("expires_in")]
 	public long ExpiresIn { get; set; } = -1L;
 
 	[JsonPropertyName("refresh_token")]
-	public string RefreshToken { get; set; } = String.Empty;
+	public string RefreshToken { get; set; } = string.Empty;
 
 	[JsonPropertyName("scope")]
-	public string Scope { get; set; } = String.Empty;
-	
+	public string Scope { get; set; } = string.Empty;
+
 	[JsonPropertyName("created_at")]
 	public long CreatedAt { get; set; } = -1L;
 
@@ -27,23 +27,25 @@ public class AuthResponse
 	public long UserId { get; set; } = -1L;
 
 	[JsonPropertyName("uuid")]
-	public string Uuid { get; set; } = String.Empty;
+	public string Uuid { get; set; } = string.Empty;
 
 	[JsonPropertyName("error")]
-	public string Error { get; set; } = String.Empty;
+	public string Error { get; set; } = string.Empty;
 
 	[JsonPropertyName("error_description")]
-	public string ErrorDescription { get; set; } = String.Empty;
+	public string ErrorDescription { get; set; } = string.Empty;
 
 	[JsonPropertyName("extra_info")]
-	public string ExtraInfo { get; set; } = String.Empty;
+	public string ExtraInfo { get; set; } = string.Empty;
+
 	public static string AuthFile()
 	{
-        return Path.Combine(RTClient.ArchivePath, "auth.json");
-    }
+		return Path.Combine(RTClient.ArchivePath, "auth.json");
+	}
+
 	public void Save()
 	{
-		if (String.IsNullOrEmpty(AccessToken) == true || String.IsNullOrEmpty(RefreshToken) == true)
+		if (string.IsNullOrEmpty(AccessToken) || string.IsNullOrEmpty(RefreshToken))
 		{
 			Console.WriteLine("Error: Could not save AuthResponse, no AccessToken or RefreshToken found.");
 			return;
@@ -53,7 +55,7 @@ public class AuthResponse
 		{
 			using (var fileStream = File.Create(AuthFile()))
 			{
-				JsonSerializer.Serialize(fileStream, this, new JsonSerializerOptions() { WriteIndented = true } );
+				JsonSerializer.Serialize(fileStream, this, new JsonSerializerOptions { WriteIndented = true });
 			}
 		}
 		catch (Exception err)
@@ -67,11 +69,11 @@ public class AuthResponse
 	{
 		var authFile = AuthFile();
 
-        if (File.Exists(authFile) == false)
+		if (File.Exists(authFile) == false)
 		{
 			return null;
 		}
-		
+
 		try
 		{
 			using (var fileStream = File.OpenRead(authFile))
@@ -87,15 +89,14 @@ public class AuthResponse
 			return null;
 		}
 	}
-	
+
 	public static void Delete()
 	{
 		var authFile = AuthFile();
 
-        if (File.Exists(authFile))
+		if (File.Exists(authFile))
 		{
 			File.Delete(authFile);
 		}
 	}
-	
 }

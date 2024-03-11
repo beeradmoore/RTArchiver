@@ -5,34 +5,34 @@ namespace RTArchiver.Data.Responses;
 public class MeResponse
 {
 	[JsonPropertyName("id")]
-	public string Id { get; set; } = String.Empty;
-	
+	public string Id { get; set; } = string.Empty;
+
 	[JsonPropertyName("type")]
-	public string Type { get; set; } = String.Empty;
+	public string Type { get; set; } = string.Empty;
 
-    [JsonPropertyName("attributes")]
-    public MeResponse_Attributes Attributes { get; set; }
+	[JsonPropertyName("attributes")]
+	public MeResponse_Attributes Attributes { get; set; }
 
-    [JsonPropertyName("meta")]
-    public MeResponse_Meta Meta { get; set; }
+	[JsonPropertyName("meta")]
+	public MeResponse_Meta Meta { get; set; }
 }
 
 public class MeResponse_Attributes
 {
-    [JsonPropertyName("uuid")]
-    public string Uuid { get; set; }
-    
-    [JsonPropertyName("username")]
-    public string Username { get; set; } = String.Empty;
+	[JsonPropertyName("uuid")]
+	public string Uuid { get; set; }
+
+	[JsonPropertyName("username")]
+	public string Username { get; set; } = string.Empty;
 }
 
 public class MeResponse_Meta
 {
-    [JsonPropertyName("id")]
-    public int Id { get; set; }
-    
-    [JsonPropertyName("full_name")]
-    public string FullName { get; set; }
+	[JsonPropertyName("id")]
+	public int Id { get; set; }
+
+	[JsonPropertyName("full_name")]
+	public string FullName { get; set; }
 }
 
 /*
