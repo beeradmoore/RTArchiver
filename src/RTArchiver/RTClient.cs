@@ -289,7 +289,7 @@ public class RTClient
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, 100, useAuth: false);
+			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, useAuth: false);
 
 			//Console.WriteLine($"Loaded page {page}, page: {channelsResponse.Page}, perPage: {channelsResponse.PerPage}, totalPages: {channelsResponse.TotalPages}, totalResults: {channelsResponse.TotalResults}");
 			if (channelsResponse != null)
@@ -347,7 +347,7 @@ public class RTClient
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page, 100);
+			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page);
 
 			//Console.WriteLine($"Loaded page {page}, page: {showsResponse.Page}, perPage: {showsResponse.PerPage}, totalPages: {showsResponse.TotalPages}, totalResults: {showsResponse.TotalResults}");
 			if (showsResponse != null)
