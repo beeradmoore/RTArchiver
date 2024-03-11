@@ -148,7 +148,7 @@ if (shows.Count > 0)
 */
 
 
-await rtClient.CacheGoBrrrr();
+//await rtClient.CacheGoBrrrr();
 
 Channel? SelectChannel()
 {
