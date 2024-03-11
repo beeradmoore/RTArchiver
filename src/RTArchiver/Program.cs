@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using RTArchiver;
 
 var rtClient = new RTClient();
@@ -53,12 +54,18 @@ if (rtClient.IsLoggedIn() == false)
 var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse.Attributes.Username}");
 
+Console.WriteLine("\nLoading genres");
 var genres = await rtClient.GetGenres();
-if(genres != null)
-{
-	Console.WriteLine(JsonSerializer.Serialize(genres.Data[0]));
-}
-//var channels = await rtClient.GetChannels();
-//var shows = await rtClient.GetShows();
+Console.WriteLine($"Found: {genres.Count}");
 
+Console.WriteLine("\nLoading channels");
+var channels = await rtClient.GetChannels();
+Console.WriteLine($"Found: {channels.Count}");
+
+Console.WriteLine("\nLoading shows");
+var shows = await rtClient.GetShows();
+Console.WriteLine($"Found: {shows.Count}");
+
+
+Debugger.Break();
 //Debugger.Break();

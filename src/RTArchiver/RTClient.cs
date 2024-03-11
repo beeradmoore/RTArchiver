@@ -11,6 +11,10 @@ public class RTClient
 	public static string ArchivePath = "archive";
 	readonly HttpClient _httpClient = new HttpClient();
 	AuthResponse? _authResponse;
+	
+	public Dictionary<string, Genre> Genres { get; } = new Dictionary<string, Genre>();
+	public Dictionary<string, Show> Shows { get; } = new Dictionary<string, Show>();
+	public Dictionary<string, Channel> Channels { get; } = new Dictionary<string, Channel>();
 
 	static RTClient()
 	{
@@ -47,7 +51,6 @@ public class RTClient
 		}
 	}
 
-	public List<Genre> Genres { get; } = new List<Genre>();
 
 	public bool IsLoggedIn()
 	{
@@ -180,23 +183,65 @@ public class RTClient
 		return await GetAPIRequest<MeResponse>("https://business-service.roosterteeth.com/api/v1/me");
 	}
 
-	public async Task<GenresResponse?> GetGenres()
+	public async Task<List<Genre>> GetGenres()
 	{
+		List<Genre> genres = new List<Genre>();
+		
 		Genres.Clear();
 		var genresResponse = await GetAPIRequest<GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
 
+		
 		if (genresResponse is not null)
 		{
-			Genres.AddRange(genresResponse.Data);
+			foreach (var genre in genresResponse.Data)
+			{
+				genres.Add(genre);
+				if (Genres.ContainsKey(genre.Slug))
+				{
+					Console.WriteLine($"Error: Duplicate genre key found, {genre.Slug}");
+				}
+
+				Genres[genre.Slug] = genre;
+			}
 		}
 
-		return genresResponse;
+		return genres;
 	}
-
-	public async Task<ChannelsResponse?> GetChannels()
+	
+	public async Task<List<Channel>> GetChannels()
 	{
-		var channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", useAuth: false);
-		return channelsResponse;
+		var channels  = new List<Channel>();
+
+		var page = 1;
+		ChannelsResponse channelsResponse;
+		do
+		{
+			// TODO: Add attempts and if a request fails and returns null try attempt again.
+			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, 100, useAuth: false);
+
+			//Console.WriteLine($"Loaded page {page}, page: {channelsResponse.Page}, perPage: {channelsResponse.PerPage}, totalPages: {channelsResponse.TotalPages}, totalResults: {channelsResponse.TotalResults}");
+			if (channelsResponse != null)
+			{
+				channels.AddRange(channelsResponse.Data);
+				++page;
+			}
+
+			// TotalPages appears to change over time, but this should still work ok. 
+		} while (page < channelsResponse.TotalPages);
+
+		// Cache on this object.
+		Channels.Clear();
+		foreach (var channel in channels)
+		{
+			if (Channels.ContainsKey(channel.Slug))
+			{
+				Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
+			}
+
+			Channels[channel.Slug] = channel;
+		}
+		
+		return channels;
 	}
 
 	public async Task<List<Show>> GetShows()
@@ -220,6 +265,18 @@ public class RTClient
 			// TotalPages appears to change over time, but this should still work ok. 
 		} while (page < showsResponse.TotalPages);
 
+		// Cache on this object.
+		Shows.Clear();
+		foreach (var show in shows)
+		{
+			if (Shows.ContainsKey(show.Slug))
+			{
+				Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
+			}
+
+			Shows[show.Slug] = show;
+		}
+		
 		return shows;
 	}
 	
