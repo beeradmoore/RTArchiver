@@ -358,6 +358,11 @@ public class RTClient
 		return seasonsResponse?.Data ?? new List<Season>();
 	}
 	
+	public void Download(Channel selectedChannel, Show selectedShow, DownloadOptions? selectDownloadOption)
+	{
+		//throw new NotImplementedException();
+	}
+	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
@@ -367,4 +372,5 @@ public class RTClient
 	// Some of these have bonus features in it as well, we should expose those.
 	// https://roosterteeth.com/episodes?channel_id=red-vs-blue-universe
 	// https://roosterteeth.com/watch/red-vs-blue-season-4-episode-58
+
 }
