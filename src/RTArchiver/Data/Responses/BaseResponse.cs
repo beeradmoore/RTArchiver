@@ -5,7 +5,7 @@ namespace RTArchiver.Data.Responses;
 public class BaseResponse<T>
 {
 	[JsonPropertyName("data")]
-	public List<T> Data { get; set; }
+	public List<T> Data { get; set; } = new List<T>();
 
 	[JsonPropertyName("page")]
 	public int Page { get; set; }

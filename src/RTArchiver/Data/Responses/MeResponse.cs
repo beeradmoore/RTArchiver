@@ -11,16 +11,16 @@ public class MeResponse
 	public string Type { get; set; } = string.Empty;
 
 	[JsonPropertyName("attributes")]
-	public MeResponse_Attributes Attributes { get; set; }
+	public MeResponse_Attributes Attributes { get; set; } = new MeResponse_Attributes();
 
 	[JsonPropertyName("meta")]
-	public MeResponse_Meta Meta { get; set; }
+	public MeResponse_Meta Meta { get; set; } = new MeResponse_Meta();
 }
 
 public class MeResponse_Attributes
 {
 	[JsonPropertyName("uuid")]
-	public string Uuid { get; set; }
+	public string Uuid { get; set; } = string.Empty;
 
 	[JsonPropertyName("username")]
 	public string Username { get; set; } = string.Empty;
@@ -32,7 +32,7 @@ public class MeResponse_Meta
 	public int Id { get; set; }
 
 	[JsonPropertyName("full_name")]
-	public string FullName { get; set; }
+	public string FullName { get; set; } = string.Empty;
 }
 
 /*

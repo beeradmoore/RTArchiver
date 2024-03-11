@@ -260,7 +260,7 @@ public class RTClient
 		var channels  = new List<Channel>();
 
 		var page = 1;
-		ChannelsResponse channelsResponse;
+		ChannelsResponse? channelsResponse;
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
@@ -274,7 +274,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < channelsResponse.TotalPages);
+		} while (page < channelsResponse?.TotalPages);
 
 		foreach (var channel in channels)
 		{
@@ -332,7 +332,7 @@ public class RTClient
 			}
 
 			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page < showsResponse.TotalPages);
+		} while (page < showsResponse?.TotalPages);
 
 		foreach (var show in shows)
 		{

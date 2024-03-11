@@ -56,12 +56,12 @@ public class Show_Links
 public class Show_Attributes
 {
 	[JsonPropertyName("title")]
-    public string Title { get; set; }
+    public string Title { get; set; } = string.Empty;
     
 	//public object rating { get; set; }
     
 	[JsonPropertyName("slug")]
-    public string Slug { get; set; }
+    public string Slug { get; set; } = string.Empty;
     
     //public Search_conversions search_conversions { get; set; }
 
@@ -72,22 +72,22 @@ public class Show_Attributes
     public bool IsSponsorsOnly { get; set; }
     
     [JsonPropertyName("published_at")]
-    public string PublishedAt { get; set; }
+    public string PublishedAt { get; set; } = string.Empty;
     
     [JsonPropertyName("summary")]
-    public string Summary { get; set; }
+    public string Summary { get; set; } = string.Empty;
     
     [JsonPropertyName("supporting_cast_url")]
-    public string SupportingCastUrl { get; set; }
+    public string SupportingCastUrl { get; set; } = string.Empty;
     
     [JsonPropertyName("category")]
-    public string Category { get; set; }
+    public string Category { get; set; } = string.Empty;
     
     [JsonPropertyName("channel_id")]
-    public string ChannelId { get; set; }
+    public string ChannelId { get; set; } = string.Empty;
     
     [JsonPropertyName("channel_slug")]
-    public string ChannelSlug { get; set; }
+    public string ChannelSlug { get; set; } = string.Empty;
     
     [JsonPropertyName("season_count")]
     public int SeasonCount { get; set; }
@@ -96,13 +96,13 @@ public class Show_Attributes
     public int EpisodeCount { get; set; }
     
     [JsonPropertyName("last_episode_golive_at")]
-    public string LastEpisodeGoLiveAt { get; set; }
+    public string LastEpisodeGoLiveAt { get; set; } = string.Empty;
     
     [JsonPropertyName("season_order")]
-    public string SeasonOrder { get; set; }
+    public string SeasonOrder { get; set; } = string.Empty;
     
     [JsonPropertyName("episode_order")]
-    public string EpisodeOrder { get; set; }
+    public string EpisodeOrder { get; set; } = string.Empty;
     
     [JsonPropertyName("trending_score")]
     public double TrendingScore { get; set; }
