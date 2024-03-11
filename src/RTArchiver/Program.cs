@@ -410,7 +410,48 @@ while (true)
 
 	if (downloadItems.Count > 0)
 	{
-		Console.WriteLine($"Downloading {downloadItems} items.");
+		var tempPath = Path.Combine(Path.GetTempPath(), "rt_archive");
+		if (Directory.Exists(tempPath) == false)
+		{
+			Directory.CreateDirectory(tempPath);
+		}
+		
+		Console.WriteLine($"Downloading {downloadItems.Count} items.");
+		var lockObject = new Object();
+		foreach (var downloadItem in downloadItems)
+		{
+			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
+			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
+			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
+			
+			try
+			{
+				var processResults = await ProcessEx.RunAsync("yt-dlp", $"-o \"{tempFile}\" --no-progress  --merge-output-format mkv --embed-subs --sub-langs all --write-description --write-info-json --write-thumbnail \"{downloadItem.RemoteManifestPath}\"");
+				if (processResults.ExitCode != 0)
+				{
+					throw new Exception("Download did not complete.");
+				}
+
+				lock (lockObject)
+				{
+					var targetDirectory = Path.GetDirectoryName(downloadItem.LocalPath);
+					if (String.IsNullOrEmpty(targetDirectory) == false && Directory.Exists(targetDirectory) == false)
+					{
+						Directory.CreateDirectory(targetDirectory);
+					}
+					
+					// Our temp file gets mkv added to it, so we need to add that to copy it.
+					File.Move(tempFile + ".mkv", downloadItem.LocalPath);
+				}
+
+				Debugger.Break();
+			}
+			catch (Exception err)
+			{
+				Console.WriteLine($"Error: {err.Message}");
+				Debugger.Break();
+			}
+		}
 	}
 	else
 	{
