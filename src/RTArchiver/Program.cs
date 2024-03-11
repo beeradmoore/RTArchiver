@@ -112,6 +112,9 @@ if (rtClient.IsLoggedIn() == false)
 var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse?.Attributes.Username}");
 
+
+
+
 Console.WriteLine("\nLoading genres");
 var genres = await rtClient.GetGenres();
 Console.WriteLine($"Found: {genres.Count}");
@@ -144,6 +147,8 @@ if (shows.Count > 0)
 }
 */
 
+
+await rtClient.CacheGoBrrrr();
 
 Channel? SelectChannel()
 {
@@ -363,13 +368,17 @@ while (true)
 		continue;
 	}
 
+	var downloadItems = new List<DownloadItem>();
+
 	if (selectedDownloadOption == DownloadOptions.Everything)
-	{	
-		await rtClient.DownloadEverything(selectedChannel, selectedShow);
+	{
+		var newDownloadItems = await rtClient.GetDownloadItemsForEverything(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
 	}
 	else if (selectedDownloadOption == DownloadOptions.AllSeasons)
 	{
-		await rtClient.DownloadAllSeasons(selectedChannel, selectedShow);
+		var newDownloadItems = await rtClient.GetDownloadItemsForAllSeasons(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
 	}
 	else if (selectedDownloadOption == DownloadOptions.SpecificSeason)
 	{
@@ -379,11 +388,13 @@ while (true)
 			// This isn't really back, this is start again.
 			continue;
 		}
-		await rtClient.DownloadSpecificSeason(selectedChannel, selectedShow, selectedSeason);
+		var newDownloadItems = await rtClient.GetDownloadItemsForSpecificSeason(selectedChannel, selectedShow, selectedSeason);
+		downloadItems.AddRange(newDownloadItems);
 	}
 	else if (selectedDownloadOption == DownloadOptions.AllBonusFeatures)
 	{	
-		await rtClient.DownloadAllBonusFeatures(selectedChannel, selectedShow);
+		var newDownloadItems = await rtClient.GetDownloadItemsForAllBonusFeatures(selectedChannel, selectedShow);
+		downloadItems.AddRange(newDownloadItems);
 	}
 	else if (selectedDownloadOption == DownloadOptions.SpecificBonusFeature)
 	{
@@ -393,7 +404,17 @@ while (true)
 			// This isn't really back, this is start again.
 			continue;
 		}
-		await rtClient.DownloadSpecificBonusFeature(selectedChannel, selectedShow, selectedBonusFeature);
+		var newDownloadItems = await rtClient.GetDownloadItemsForSpecificBonusFeature(selectedChannel, selectedShow, selectedBonusFeature);
+		downloadItems.AddRange(newDownloadItems);
+	}
+
+	if (downloadItems.Count > 0)
+	{
+		Console.WriteLine($"Downloading {downloadItems} items.");
+	}
+	else
+	{
+		Console.WriteLine("Could not find anything to download.");
 	}
 	
 

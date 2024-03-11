@@ -29,16 +29,16 @@ public class BonusFeature
 public class BonusFeature_Attributes
 {
 	[JsonPropertyName("title")]
-    public string Title { get; set; }
+	public string Title { get; set; } = string.Empty;
     
 	[JsonPropertyName("slug")]
-    public string Slug { get; set; }
+    public string Slug { get; set; } = string.Empty;
     
 	//[JsonPropertyName("rating")]
     //public object Rating { get; set; }
     
 	[JsonPropertyName("caption")]
-    public string Caption { get; set; }
+    public string Caption { get; set; } = string.Empty;
     
 	[JsonPropertyName("number")]
     public int Number { get; set; }
@@ -47,55 +47,55 @@ public class BonusFeature_Attributes
     public int SortNumber { get; set; }
     
 	[JsonPropertyName("description")]
-    public string Description { get; set; }
+    public string Description { get; set; } = string.Empty;
     
 	[JsonPropertyName("display_title")]
-    public string DisplayTitle { get; set; }
+    public string DisplayTitle { get; set; } = string.Empty;
     
 	[JsonPropertyName("length")]
     public int Length { get; set; }
     
 	[JsonPropertyName("advert_config")]
-    public string AdvertConfig { get; set; }
+    public string AdvertConfig { get; set; } = string.Empty;
     
 	[JsonPropertyName("advertising")]
     public bool Advertising { get; set; }
     
 	[JsonPropertyName("ad_timestamps")]
-    public string AdTimestamps { get; set; }
+    public string AdTimestamps { get; set; } = string.Empty;
     
 	[JsonPropertyName("public_golive_at")]
-    public string PublicGoLiveAt { get; set; }
+    public string PublicGoLiveAt { get; set; } = string.Empty;
     
 	[JsonPropertyName("sponsor_golive_at")]
-    public string SponsorGoLiveAt { get; set; }
+    public string SponsorGoLiveAt { get; set; } = string.Empty;
     
 	[JsonPropertyName("member_golive_at")]
-    public string MemberGoLiveAt { get; set; }
+    public string MemberGoLiveAt { get; set; } = string.Empty;
     
 	[JsonPropertyName("original_air_date")]
-    public string OriginalAirDate { get; set; }
+    public string OriginalAirDate { get; set; } = string.Empty;
     
 	[JsonPropertyName("channel_id")]
-    public string ChannelId { get; set; }
+    public string ChannelId { get; set; } = string.Empty;
     
 	[JsonPropertyName("channel_slug")]
-    public string ChannelSlug { get; set; }
+    public string ChannelSlug { get; set; } = string.Empty;
     
 	[JsonPropertyName("parent_content_id")]
-    public string ParentContentId { get; set; }
+    public string ParentContentId { get; set; } = string.Empty;
     
 	[JsonPropertyName("parent_content_type")]
-    public string ParentContentType { get; set; }
+    public string ParentContentType { get; set; } = string.Empty;
     
 	[JsonPropertyName("parent_content_slug")]
-    public string ParentContentSlug { get; set; }
+    public string ParentContentSlug { get; set; } = string.Empty;
     
 	[JsonPropertyName("parent_content_title")]
-    public string ParentContentTitle { get; set; }
+    public string ParentContentTitle { get; set; } = string.Empty;
     
 	[JsonPropertyName("show_id")]
-    public string ShowId { get; set; }
+    public string ShowId { get; set; } = string.Empty;
     
 	[JsonPropertyName("is_sponsors_only")]
     public bool IsSponsorsOnly { get; set; }
