@@ -134,8 +134,22 @@ public class RTClient
 		}
 	}
 
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, bool useAuth = true)
+	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order= "asc", bool useAuth = true)
 	{
+		if (url.StartsWith("https://svod-be.roosterteeth.com"))
+		{
+			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase) == true)
+			{
+				url += "&";
+			}
+			else
+			{
+				url += "?";
+			}
+
+			url += $"per_page={perPage}&page={page}&order={order}";
+		}
+
 		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
 		{
 			if (useAuth)
@@ -180,13 +194,14 @@ public class RTClient
 
 	public async Task<ChannelsResponse?> GetChannels()
 	{
-		var channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", false);
+		var channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", useAuth: false);
 		return channelsResponse;
 	}
 
 	public async Task<ShowsResponse?> GetShows()
 	{
-		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows");
+		var page = 1;
+		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page: page, perPage: 50);
 		return showsResponse;
 	}
 
