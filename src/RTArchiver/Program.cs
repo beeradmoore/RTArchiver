@@ -1,4 +1,5 @@
-﻿using RTArchiver;
+﻿using System.Text.Json;
+using RTArchiver;
 
 var rtClient = new RTClient();
 
@@ -53,7 +54,11 @@ var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse.Attributes.Username}");
 
 var genres = await rtClient.GetGenres();
+if(genres != null)
+{
+	Console.WriteLine(JsonSerializer.Serialize(genres.Data[0]));
+}
 //var channels = await rtClient.GetChannels();
-var shows = await rtClient.GetShows();
+//var shows = await rtClient.GetShows();
 
 //Debugger.Break();

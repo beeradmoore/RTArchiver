@@ -222,8 +222,7 @@ public class RTClient
 
 		return shows;
 	}
-
-
+	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
