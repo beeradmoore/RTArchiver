@@ -147,7 +147,34 @@ public class RTClient
 		}
 	}
 
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order = "asc", bool useAuth = true)
+	/*
+	async Task<TResponse?> GetAllAPIRequest<TResponse>(string url) where TResponse : VideosResponse, BonusFeaturesResponse
+	{
+		var page = 1;
+		TResponse? firstResponse = default(TResponse);
+		TResponse response;
+		do
+		{
+			response = await GetAPIRequest<TResponse>(url, page, 5);
+			if (firstResponse == null)
+			{
+				firstResponse = response;
+			}
+			else
+			{
+				firstResponse.Data.AddRange(response.Data);
+			}
+
+
+			++page;
+		} while (page <= response?.TotalPages);
+		
+
+		return firstResponse;
+	}
+	*/
+
+	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 1000, string order = "asc", bool useAuth = true)
 	{
 		// Some api endpoints are just /api/v1/doStuff, so if one gets past here we add the svod-be address.
 		if (url.StartsWith("/api/v1/"))
@@ -467,17 +494,28 @@ public class RTClient
 		return episodes;
 	}
 	
+	
 	public async Task<List<Episode>> GetEpisodes(Channel channel)
 	{
 		// TODO: pagination?
 		var episodes = new List<Episode>();
-		var episodeResponse = await GetAPIRequest<EpidsodesResponse>(channel.Links.Episodes);
-		if (episodeResponse?.Data != null)
+
+		var page = 1;
+		EpidsodesResponse episodeResponse;
+		do
 		{
-			episodes.AddRange(episodeResponse.Data);
-		}
+			episodeResponse = await GetAPIRequest<EpidsodesResponse>(channel.Links.Episodes, page: page);
+			if (episodeResponse?.Data != null)
+			{
+				episodes.AddRange(episodeResponse.Data);
+			}
+
+			++page;
+		} while (page < episodeResponse?.TotalPages);
+		
 		return episodes;
 	}
+	
 	
 	
 	public async Task<List<BonusFeature>> GetBonusFeatures(Show show)
@@ -493,6 +531,32 @@ public class RTClient
 		return bonusFeatures;
 	}
 	
+	public async Task<List<Video>> GetVideos(Episode episode)
+	{
+		// TODO: pagination?
+		var videos = new List<Video>();
+		var videosResponse = await GetAPIRequest<VideosResponse>(episode.Links.Videos);
+		if (videosResponse?.Data != null)
+		{
+			videos.AddRange(videosResponse.Data);
+		}
+
+		return videos;
+	}
+	
+	public async Task<List<Video>> GetVideos(BonusFeature bonusFeature)
+	{
+		// TODO: pagination?
+		var videos = new List<Video>();
+		var videosResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
+		if (videosResponse?.Data != null)
+		{
+			videos.AddRange(videosResponse.Data);
+		}
+
+		return videos;
+	}
+	
 	
 	
 	
@@ -504,7 +568,18 @@ public class RTClient
 		foreach (var season in seasons)
 		{
 			var episodes = await GetEpisodes(season);
-			Debugger.Break();
+			foreach (var episode in episodes)
+			{
+				var videos = await GetVideos(episode);
+				foreach (var video in videos)
+				{
+					downloadItems.Add(new DownloadItem()
+					{
+						RemoteManifestPath = video.Links.Download,
+						LocalPath = episode.FullLocalPath(),
+					});
+				}
+			}
 		}
 		
 		return downloadItems;
@@ -514,7 +589,21 @@ public class RTClient
 	public async Task<List<DownloadItem>> GetDownloadItemsForSpecificSeason(Channel channel, Show show, Season season)
 	{
 		var downloadItems = new List<DownloadItem>();
-		await Task.Delay(1);
+		
+		var episodes = await GetEpisodes(season);
+		foreach (var episode in episodes)
+		{
+			var videos = await GetVideos(episode);
+			foreach (var video in videos)
+			{
+				downloadItems.Add(new DownloadItem()
+				{
+					RemoteManifestPath = video.Links.Download,
+					LocalPath = episode.FullLocalPath(),
+				});
+			}
+		}
+		
 		return downloadItems;
 	}
 	
@@ -522,7 +611,20 @@ public class RTClient
 	public async Task<List<DownloadItem>> GetDownloadItemsForAllBonusFeatures(Channel channel, Show show)
 	{
 		var downloadItems = new List<DownloadItem>();
-		await Task.Delay(1);
+		
+		var bonusFeatures = await GetBonusFeatures(show);
+		foreach (var bonusFeature in bonusFeatures)
+		{
+			var videos = await GetVideos(bonusFeature);
+			foreach (var video in videos)
+			{
+				downloadItems.Add(new DownloadItem()
+				{
+					RemoteManifestPath = video.Links.Download,
+					LocalPath = bonusFeature.FullLocalPath(show),
+				});
+			}
+		}
 		return downloadItems;
 	}
 	
@@ -530,7 +632,15 @@ public class RTClient
 	public async Task<List<DownloadItem>> GetDownloadItemsForSpecificBonusFeature(Channel channel, Show show, BonusFeature bonusFeature)
 	{
 		var downloadItems = new List<DownloadItem>();
-		await Task.Delay(1);
+		var videos = await GetVideos(bonusFeature);
+		foreach (var video in videos)
+		{
+			downloadItems.Add(new DownloadItem()
+			{
+				RemoteManifestPath = video.Links.Download,
+				LocalPath = bonusFeature.FullLocalPath(show),
+			});
+		}
 		return downloadItems;
 	}
 	
@@ -547,8 +657,23 @@ public class RTClient
 
 	public async Task CacheGoBrrrr()
 	{
+		/*
+		var response = await GetAllAPIRequest<BaseResponse<object>>("https://svod-be.roosterteeth.com/api/v1/shows/camp-camp");
+		Debugger.Break();
+		*/
+		
 		foreach (var channel in Channels.Values)
 		{
+			
+			
+			// Disabled as this is a lot of videos
+			var allEpisodes = await GetEpisodes(channel);
+			foreach (var episode in allEpisodes)
+			{
+				Console.WriteLine($" -> {episode.FileName()}");
+			}
+			
+
 			Console.WriteLine($"Channel: {channel.Name}");
 			Console.WriteLine("Shows:");
 			var shows = await GetShows(channel);
@@ -566,7 +691,9 @@ public class RTClient
 					var episodes = await GetEpisodes(season);
 					foreach (var episode in episodes)
 					{
-						Console.WriteLine($"   -> {episode.FileName()}");
+						Console.WriteLine($"   -> {episode.FullLocalPath()}");
+						var videos = await GetVideos(episode);
+						Console.WriteLine($"    -> {videos.Count}");
 					}
 				}
 				
@@ -575,14 +702,14 @@ public class RTClient
 				foreach (var bonusFeature in bonusFeatures)
 				{
 					Console.WriteLine($"  -> {bonusFeature.Attributes.Title}");
+					
+					
+					Console.WriteLine($"   -> {bonusFeature.FullLocalPath(show)}");
+					var videos = await GetVideos(bonusFeature);
+					Console.WriteLine($"    -> {videos.Count}");
+					
 					//bonusFeature.Links.Videos
 				}
-			}
-			
-			var allEpisodes = await GetEpisodes(channel);
-			foreach (var episode in allEpisodes)
-			{
-				Console.WriteLine($" -> {episode.FileName()}");
 			}
 			
 		}
