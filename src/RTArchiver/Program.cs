@@ -1,9 +1,64 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using RTArchiver;
 using RTArchiver.Data;
+using RunProcessAsTask;
 
 Console.WriteLine("~~ Rooster Teeth Archiver ~~");
+
+var hasLaunchWarnings = false;
+
+// Check ffmpeg exists
+try
+{
+	var processResults = await ProcessEx.RunAsync("ffmpeg", "-version");
+	if (processResults.ExitCode != 0)
+	{
+		throw new Exception("Could not find ffmpeg in system path.");
+	}
+}
+catch (Exception err)
+{
+	Console.WriteLine("Warning: ffmpeg");
+	Console.WriteLine(err.Message);
+	Console.WriteLine("Make sure ffmpeg is installed.");
+	Console.WriteLine("https://ffmpeg.org//download.html");
+	if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+	{
+		Console.WriteLine("> winget install -e --id Gyan.FFmpeg");
+	}
+	hasLaunchWarnings = true;
+}
+
+// Check yt-dlp exists
+try
+{
+	var processResults = await ProcessEx.RunAsync("yt-dlp", "--version");
+	if (processResults.ExitCode != 0)
+	{
+		throw new Exception("Could not find yt-dlp in system path.");
+	}
+}
+catch (Exception err)
+{
+	Console.WriteLine("Warning: yt-dlp");
+	Console.WriteLine(err.Message);
+	Console.WriteLine("Make sure yt-dlp is installed.");
+	Console.WriteLine("- https://github.com/yt-dlp/yt-dlp");
+	if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+	{
+		Console.WriteLine("> winget install -e --id yt-dlp.yt-dlp");
+	}
+	hasLaunchWarnings = true;
+}
+
+
+if (hasLaunchWarnings)
+{
+	// Wait 5 seconds if there is launch warnings.
+	await Task.Delay(5000);
+}
 
 var rtClient = new RTClient();
 
