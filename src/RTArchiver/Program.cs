@@ -144,6 +144,7 @@ if (shows.Count > 0)
 }
 */
 
+
 Channel? SelectChannel()
 {
 	do
@@ -250,8 +251,8 @@ DownloadOptions? SelectDownloadOption(Channel channel, Show show)
 					1 => RTArchiver.Data.DownloadOptions.Everything,
 					2 => RTArchiver.Data.DownloadOptions.AllSeasons,
 					3 => RTArchiver.Data.DownloadOptions.SpecificSeason,
-					4 => RTArchiver.Data.DownloadOptions.AllBehindTheScenes,
-					5 => RTArchiver.Data.DownloadOptions.SpecificBehindTheScenes,
+					4 => RTArchiver.Data.DownloadOptions.AllBonusFeatures,
+					5 => RTArchiver.Data.DownloadOptions.SpecificBonusFeature,
 					_ => null, // this should never happen.
 				};
 			}
@@ -259,6 +260,87 @@ DownloadOptions? SelectDownloadOption(Channel channel, Show show)
 	} while (true);
 }
 
+
+
+async Task<Season?> SelectSeason(Show show)
+{
+	var seasons = await rtClient.GetSeasons(show.Slug);
+	seasons.Sort((a, b) => a.Attributes.Number.CompareTo(b.Attributes.Number));
+	
+	do
+	{
+		Console.WriteLine("\n\n");
+		
+		for (var i = 0; i < seasons.Count; ++i)
+		{
+			Console.WriteLine($"{i+1}. {seasons[i].Attributes.Title}");
+		}
+
+		Console.WriteLine("b. Back");
+		Console.WriteLine("q. Quit");
+		
+		Console.Write("Select season: ");
+		var seasonSelected = Console.ReadLine()?.Trim() ?? string.Empty;
+
+		if (string.Equals(seasonSelected, "q", StringComparison.OrdinalIgnoreCase))
+		{
+			Environment.Exit(0);
+		}
+		else if (string.Equals(seasonSelected, "b", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+		else if (int.TryParse(seasonSelected, out int seasonNumber) == true)
+		{
+			seasonNumber -= 1;
+			if (seasonNumber >= 0 && seasonNumber < seasons.Count)
+			{
+				return seasons[seasonNumber];
+			}
+		}
+	} while (true);
+}
+
+
+
+async Task<BonusFeature?> SelectBonusFeature(Show show)
+{
+	var bonusFeatures = await rtClient.GetBonusFeatures(show.Slug);
+	bonusFeatures.Sort((a, b) => a.Attributes.Number.CompareTo(b.Attributes.Number));
+	
+	do
+	{
+		Console.WriteLine("\n\n");
+		
+		for (var i = 0; i < bonusFeatures.Count; ++i)
+		{
+			Console.WriteLine($"{i+1}. {bonusFeatures[i].Attributes.Title}");
+		}
+
+		Console.WriteLine(" b. Back");
+		Console.WriteLine(" q. Quit");
+		
+		Console.Write("Select bonus feature: ");
+		var selectedBonusFeature = Console.ReadLine()?.Trim() ?? string.Empty;
+
+		if (string.Equals(selectedBonusFeature, "q", StringComparison.OrdinalIgnoreCase))
+		{
+			Environment.Exit(0);
+		}
+		else if (string.Equals(selectedBonusFeature, "b", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+		else if (int.TryParse(selectedBonusFeature, out int bonusFeatureNumber) == true)
+		{
+			bonusFeatureNumber -= 1;
+			if (bonusFeatureNumber >= 0 && bonusFeatureNumber < bonusFeatures.Count)
+			{
+				return bonusFeatures[bonusFeatureNumber];
+			}
+		}
+	} while (true);
+}
 
 while (true)
 {
@@ -274,14 +356,47 @@ while (true)
 		continue;
 	}
 	
-	var selectDownloadOption = SelectDownloadOption(selectedChannel, selectedShow);
-	if (selectDownloadOption == null)
+	var selectedDownloadOption = SelectDownloadOption(selectedChannel, selectedShow);
+	if (selectedDownloadOption == null)
 	{
 		// Technically this takes you back to the first option.
 		continue;
 	}
+
+	if (selectedDownloadOption == DownloadOptions.Everything)
+	{	
+		await rtClient.DownloadEverything(selectedChannel, selectedShow);
+	}
+	else if (selectedDownloadOption == DownloadOptions.AllSeasons)
+	{
+		await rtClient.DownloadAllSeasons(selectedChannel, selectedShow);
+	}
+	else if (selectedDownloadOption == DownloadOptions.SpecificSeason)
+	{
+		var selectedSeason = await SelectSeason(selectedShow);
+		if (selectedSeason == null)
+		{
+			// This isn't really back, this is start again.
+			continue;
+		}
+		await rtClient.DownloadSpecificSeason(selectedChannel, selectedShow, selectedSeason);
+	}
+	else if (selectedDownloadOption == DownloadOptions.AllBonusFeatures)
+	{	
+		await rtClient.DownloadAllBonusFeatures(selectedChannel, selectedShow);
+	}
+	else if (selectedDownloadOption == DownloadOptions.SpecificBonusFeature)
+	{
+		var selectedBonusFeature = await SelectBonusFeature(selectedShow);
+		if (selectedBonusFeature == null)
+		{
+			// This isn't really back, this is start again.
+			continue;
+		}
+		await rtClient.DownloadSpecificBonusFeature(selectedChannel, selectedShow, selectedBonusFeature);
+	}
 	
-	rtClient.Download(selectedChannel, selectedShow, selectDownloadOption);
+
 	
 	Debugger.Break();
 }

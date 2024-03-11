@@ -5,6 +5,6 @@ public enum DownloadOptions
 	Everything,
 	AllSeasons,
 	SpecificSeason,
-	AllBehindTheScenes,
-	SpecificBehindTheScenes,
+	AllBonusFeatures,
+	SpecificBonusFeature,
 }

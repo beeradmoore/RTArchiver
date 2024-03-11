@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -376,16 +377,48 @@ public class RTClient
 		return shows;
 	}
 
-	public async Task<List<Season>> GetSeasons(string slug)
+	public async Task<List<Season>> GetSeasons(string showSlug)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{slug}/seasons");
+		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
 		return seasonsResponse?.Data ?? new List<Season>();
 	}
 	
-	public void Download(Channel selectedChannel, Show selectedShow, DownloadOptions? selectDownloadOption)
+	public async Task<List<BonusFeature>> GetBonusFeatures(string showSlug)
 	{
-		//throw new NotImplementedException();
+		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
+		return bonusFeaturesResponse?.Data ?? new List<BonusFeature>();
 	}
+	
+		
+	public async Task DownloadEverything(Channel selectedChannel, Show selectedShow)
+	{
+		await Task.Delay(1);
+	}
+	
+	
+	public async Task DownloadAllSeasons(Channel selectedChannel, Show selectedShow)
+	{
+		await Task.Delay(1);
+	}
+	
+	
+	public async Task DownloadSpecificSeason(Channel selectedChannel, Show selectedShow, Season season)
+	{
+		await Task.Delay(1);
+	}
+	
+	
+	public async Task DownloadAllBonusFeatures(Channel selectedChannel, Show selectedShow)
+	{
+		await Task.Delay(1);
+	}
+	
+	
+	public async Task DownloadSpecificBonusFeature(Channel selectedChannel, Show selectedShow, BonusFeature selectedBonusFeature)
+	{
+		await Task.Delay(1);
+	}
+	
 	
 	// TODO: Handle these APIs, set useAuth when its not required 
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
