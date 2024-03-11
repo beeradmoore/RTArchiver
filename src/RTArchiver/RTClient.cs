@@ -146,6 +146,8 @@ public class RTClient
 
 	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order = "asc", bool useAuth = true)
 	{
+		var shouldCache = false;
+		
 		if (url.StartsWith("https://svod-be.roosterteeth.com"))
 		{
 			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase))
@@ -158,11 +160,14 @@ public class RTClient
 			}
 
 			url += $"per_page={perPage}&page={page}&order={order}";
+			shouldCache = true;
 		}
+
+		var uri = new Uri(url);
 
 		//Console.WriteLine(url);
 
-		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+		using (var request = new HttpRequestMessage(HttpMethod.Get, uri))
 		{
 			if (useAuth)
 			{
@@ -173,16 +178,35 @@ public class RTClient
 
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
 
-#if DEBUG
-			// Helps debug a specific endpoint as plaintext.
-			if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
+			using (var responseStream = await response.Content.ReadAsStreamAsync())
 			{
-				var responseData = await response.Content.ReadAsStringAsync();
-				//Debugger.Break();
-			}
+				if (shouldCache)
+				{
+					var requestCacheFile = uri.AbsolutePath.Substring("/api/v1/".Length).Replace("/", "_", StringComparison.OrdinalIgnoreCase) + "_" + page.ToString().PadLeft(2, '0') + ".json";
+					var requestCachePath = Path.Combine(_archiveCachePath, requestCacheFile);
+					try
+					{
+						using (var fileStream = File.Create(requestCachePath))
+						{
+							await responseStream.CopyToAsync(fileStream);
+						}
+					}
+					catch (Exception err)
+					{
+						Console.WriteLine($"Error: Could not save request to disk, {requestCacheFile}");
+					}
+				}
+#if DEBUG
+				// Helps debug a specific endpoint as plaintext.
+				if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
+				{
+					//Debugger.Break();
+				}
 #endif
 
-			return await response.Content.ReadFromJsonAsync<TResponse>();
+				responseStream.Position = 0;
+				return await JsonSerializer.DeserializeAsync<TResponse>(responseStream);
+			}
 		}
 	}
 
