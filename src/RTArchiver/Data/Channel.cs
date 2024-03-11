@@ -21,6 +21,12 @@ namespace RTArchiver.Data
 
 		[JsonPropertyName("uuid")]
 		public string Uuid { get; set; } = string.Empty;
+		
+		[JsonIgnore]
+		public string Name => Attributes?.Name ?? string.Empty;
+
+		[JsonIgnore]
+		public string Slug => Attributes?.Slug ?? string.Empty;
 	}
 
 	public class Channel_Attributes
