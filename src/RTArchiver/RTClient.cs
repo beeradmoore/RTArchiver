@@ -81,8 +81,8 @@ public class RTClient
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
 			
 			#if DEBUG
-			var responseData = await response.Content.ReadAsStringAsync();
-			Debugger.Break();
+			//var responseData = await response.Content.ReadAsStringAsync();
+			//Debugger.Break();
 			#endif
 		
 			return await response.Content.ReadFromJsonAsync<TResponse>();
