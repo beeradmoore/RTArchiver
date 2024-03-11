@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
@@ -11,7 +12,8 @@ public class RTClient
 	public static string ArchivePath = "archive";
 	readonly HttpClient _httpClient = new HttpClient();
 	AuthResponse? _authResponse;
-	
+	string _archiveCachePath;
+
 	public Dictionary<string, Genre> Genres { get; } = new Dictionary<string, Genre>();
 	public Dictionary<string, Show> Shows { get; } = new Dictionary<string, Show>();
 	public Dictionary<string, Channel> Channels { get; } = new Dictionary<string, Channel>();
@@ -41,6 +43,12 @@ public class RTClient
 
 	public RTClient()
 	{
+		_archiveCachePath = Path.Combine(ArchivePath, "cache");
+		if (Directory.Exists(_archiveCachePath) == false)
+		{
+			Directory.CreateDirectory(_archiveCachePath);
+		}
+		
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
 		_httpClient.DefaultRequestHeaders.Add("client-type", "web");
 
@@ -185,17 +193,31 @@ public class RTClient
 
 	public async Task<List<Genre>> GetGenres()
 	{
-		List<Genre> genres = new List<Genre>();
-		
 		Genres.Clear();
-		var genresResponse = await GetAPIRequest<GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
-
 		
+		var genresCacheFile = Path.Combine(_archiveCachePath, "genres.json");
+		if (File.Exists(genresCacheFile))
+		{
+			using (var fileStream = File.OpenRead(genresCacheFile))
+			{
+				var tempGenres = JsonSerializer.Deserialize<Dictionary<string, Genre>>(fileStream);
+				if (tempGenres != null)
+				{
+					foreach (var tempGenre in tempGenres)
+					{
+						Genres[tempGenre.Key] = tempGenre.Value;
+					}
+
+					return Genres.Values.ToList();
+				}
+			}
+		}
+		
+		var genresResponse = await GetAPIRequest<GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
 		if (genresResponse is not null)
 		{
 			foreach (var genre in genresResponse.Data)
 			{
-				genres.Add(genre);
 				if (Genres.ContainsKey(genre.Slug))
 				{
 					Console.WriteLine($"Error: Duplicate genre key found, {genre.Slug}");
@@ -204,12 +226,37 @@ public class RTClient
 				Genres[genre.Slug] = genre;
 			}
 		}
+		
+		using (var fileStream = File.Create(genresCacheFile))
+		{
+			await JsonSerializer.SerializeAsync(fileStream, Genres, new JsonSerializerOptions() { WriteIndented = true });
+		}
 
-		return genres;
+		return Genres.Values.ToList();
 	}
 	
 	public async Task<List<Channel>> GetChannels()
 	{
+		Channels.Clear();
+		
+		var channelsCacheFile = Path.Combine(_archiveCachePath, "channels.json");
+		if (File.Exists(channelsCacheFile))
+		{
+			using (var fileStream = File.OpenRead(channelsCacheFile))
+			{
+				var tempChannels = JsonSerializer.Deserialize<Dictionary<string, Channel>>(fileStream);
+				if (tempChannels != null)
+				{
+					foreach (var tempChannel in tempChannels)
+					{
+						Channels[tempChannel.Key] = tempChannel.Value;
+					}
+
+					return Channels.Values.ToList();
+				}
+			}
+		}
+		
 		var channels  = new List<Channel>();
 
 		var page = 1;
@@ -229,27 +276,49 @@ public class RTClient
 			// TotalPages appears to change over time, but this should still work ok. 
 		} while (page < channelsResponse.TotalPages);
 
-		// Cache on this object.
-		Channels.Clear();
 		foreach (var channel in channels)
 		{
 			if (Channels.ContainsKey(channel.Slug))
 			{
 				Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
 			}
-
 			Channels[channel.Slug] = channel;
 		}
 		
+		using (var fileStream = File.Create(channelsCacheFile))
+		{
+			await JsonSerializer.SerializeAsync(fileStream, Channels, new JsonSerializerOptions() { WriteIndented = true });
+		}
+
 		return channels;
 	}
 
 	public async Task<List<Show>> GetShows()
 	{
+		Shows.Clear();
+		
+		var showsCacheFile = Path.Combine(_archiveCachePath, "shows.json");
+		if (File.Exists(showsCacheFile))
+		{
+			using (var fileStream = File.OpenRead(showsCacheFile))
+			{
+				var tempShows = JsonSerializer.Deserialize<Dictionary<string, Show>>(fileStream);
+				if (tempShows != null)
+				{
+					foreach (var tempShow in tempShows)
+					{
+						Shows[tempShow.Key] = tempShow.Value;
+					}
+
+					return Shows.Values.ToList();
+				}
+			}
+		}
+		
 		var shows = new List<Show>();
 
 		var page = 1;
-		ShowsResponse showsResponse;
+		ShowsResponse? showsResponse;
 		do
 		{
 			// TODO: Add attempts and if a request fails and returns null try attempt again.
@@ -265,8 +334,6 @@ public class RTClient
 			// TotalPages appears to change over time, but this should still work ok. 
 		} while (page < showsResponse.TotalPages);
 
-		// Cache on this object.
-		Shows.Clear();
 		foreach (var show in shows)
 		{
 			if (Shows.ContainsKey(show.Slug))
@@ -275,6 +342,11 @@ public class RTClient
 			}
 
 			Shows[show.Slug] = show;
+		}
+		
+		using (var fileStream = File.Create(showsCacheFile))
+		{
+			await JsonSerializer.SerializeAsync(fileStream, Shows, new JsonSerializerOptions() { WriteIndented = true });
 		}
 		
 		return shows;
