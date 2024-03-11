@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using RTArchiver.Data;
@@ -134,11 +133,11 @@ public class RTClient
 		}
 	}
 
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order= "asc", bool useAuth = true)
+	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 500, string order = "asc", bool useAuth = true)
 	{
 		if (url.StartsWith("https://svod-be.roosterteeth.com"))
 		{
-			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase) == true)
+			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase))
 			{
 				url += "&";
 			}
@@ -149,6 +148,8 @@ public class RTClient
 
 			url += $"per_page={perPage}&page={page}&order={order}";
 		}
+
+		//Console.WriteLine(url);
 
 		using (var request = new HttpRequestMessage(HttpMethod.Get, url))
 		{
@@ -166,7 +167,7 @@ public class RTClient
 			if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
 			{
 				var responseData = await response.Content.ReadAsStringAsync();
-				Debugger.Break();
+				//Debugger.Break();
 			}
 #endif
 
@@ -198,11 +199,28 @@ public class RTClient
 		return channelsResponse;
 	}
 
-	public async Task<ShowsResponse?> GetShows()
+	public async Task<List<Show>> GetShows()
 	{
+		var shows = new List<Show>();
+
 		var page = 1;
-		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page: page, perPage: 50);
-		return showsResponse;
+		ShowsResponse showsResponse;
+		do
+		{
+			// TODO: Add attempts and if a request fails and returns null try attempt again.
+			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page, 100);
+
+			//Console.WriteLine($"Loaded page {page}, page: {showsResponse.Page}, perPage: {showsResponse.PerPage}, totalPages: {showsResponse.TotalPages}, totalResults: {showsResponse.TotalResults}");
+			if (showsResponse != null)
+			{
+				shows.AddRange(showsResponse.Data);
+				++page;
+			}
+
+			// TotalPages appears to change over time, but this should still work ok. 
+		} while (page < showsResponse.TotalPages);
+
+		return shows;
 	}
 
 

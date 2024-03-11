@@ -1,5 +1,5 @@
 namespace RTArchiver.Data.Responses;
 
-public class ShowsResponse : BaseResponse<object>
+public class ShowsResponse : BaseResponse<Show>
 {
 }
