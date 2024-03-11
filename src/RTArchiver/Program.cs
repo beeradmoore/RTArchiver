@@ -59,7 +59,7 @@ var genres = await rtClient.GetGenres();
 if(genres != null)
 {
 	Console.WriteLine($"Found: {genres.Count}");
-	Console.WriteLine(JsonSerializer.Serialize(genres.Data[0], new JsonSerializerOptions { WriteIndented = true }));
+	Console.WriteLine(JsonSerializer.Serialize(genres[0], new JsonSerializerOptions { WriteIndented = true }));
 }
 var seasons = await rtClient.GetSeasons("camp-camp");
 if(seasons != null)
