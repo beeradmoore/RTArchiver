@@ -81,8 +81,12 @@ public class RTClient
 			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
 			
 			#if DEBUG
-			//var responseData = await response.Content.ReadAsStringAsync();
-			//Debugger.Break();
+			// Helps debug a specific endpoint as plaintext.
+			if (url.Contains("shows"))
+			{
+				var responseData = await response.Content.ReadAsStringAsync();
+				Debugger.Break();
+			}
 			#endif
 		
 			return await response.Content.ReadFromJsonAsync<TResponse>();
@@ -107,9 +111,20 @@ public class RTClient
 		return genresResponse;
 	}
 	
+	public async Task<ChannelsResponse?> GetChannels()
+	{
+		var channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", false);
+		return channelsResponse;
+	}
+	
+	public async Task<ShowsResponse?> GetShows()
+	{
+		var showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows");
+		return showsResponse;
+	}
+	
 	
 	// TODO: Handle these APIs, set useAuth when its not required 
-	// https://svod-be.roosterteeth.com/api/v1/genres (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
 	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
 	
