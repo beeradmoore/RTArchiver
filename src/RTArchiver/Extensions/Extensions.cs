@@ -22,12 +22,12 @@ public static class Extensions
 
 	public static string FullLocalPath(this Episode episode)
 	{
-		return Path.Combine(RTClient.ArchivePath, "videos", episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug, "seasons", episode.Attributes.SeasonSlug, episode.FileName());
+		return Path.Combine(Storage.VideosPath, episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug, "seasons", episode.Attributes.SeasonSlug, episode.FileName());
 	}
 
 	public static string FullLocalPath(this BonusFeature bonusFeature, Show show)
 	{
-		return Path.Combine(RTClient.ArchivePath, "videos", bonusFeature.Attributes.ChannelSlug, show.Slug, "bonus_features", bonusFeature.Attributes.Slug, bonusFeature.FileName());
+		return Path.Combine(Storage.VideosPath, bonusFeature.Attributes.ChannelSlug, show.Slug, "bonus_features", bonusFeature.Attributes.Slug, bonusFeature.FileName());
 	}
 	// P
 	

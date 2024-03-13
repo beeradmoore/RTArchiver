@@ -13,47 +13,16 @@ namespace RTArchiver;
 
 public class RTClient
 {
-	public static string ArchivePath = "archive";
 	readonly HttpClient _httpClient = new HttpClient();
 	AuthResponse? _authResponse;
-	string _archiveCachePath;
 
 	public Dictionary<string, Genre> Genres { get; } = new Dictionary<string, Genre>();
 	public Dictionary<string, Show> Shows { get; } = new Dictionary<string, Show>();
 	public Dictionary<string, Channel> Channels { get; } = new Dictionary<string, Channel>();
-
-	static RTClient()
-	{
-		var rtArchivePath = Environment.GetEnvironmentVariable("RT_ARCHIVE_PATH");
-		if (string.IsNullOrEmpty(rtArchivePath) == false)
-		{
-			ArchivePath = rtArchivePath;
-		}
-
-		try
-		{
-			if (Directory.Exists(ArchivePath) == false)
-			{
-				Directory.CreateDirectory(ArchivePath);
-			}
-		}
-		catch (Exception err)
-		{
-			Log.Error(err, $"Could not create ArchivePath {ArchivePath}");
-			Console.WriteLine($"Error: Could not create ArchivePath {ArchivePath}");
-			Console.WriteLine(err.Message);
-			Environment.Exit(1);
-		}
-	}
+	
 
 	public RTClient()
 	{
-		_archiveCachePath = Path.Combine(ArchivePath, "cache");
-		if (Directory.Exists(_archiveCachePath) == false)
-		{
-			Directory.CreateDirectory(_archiveCachePath);
-		}
-		
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
 		_httpClient.DefaultRequestHeaders.Add("client-type", "web");
 
@@ -216,7 +185,7 @@ public class RTClient
 		}
 		requestCacheFile += $"_page{page.ToString().PadLeft(2, '0')}.json";
 		
-		var requestCachePath = Path.Combine(_archiveCachePath, requestCacheFile);
+		var requestCachePath = Path.Combine(Storage.CachePath, requestCacheFile);
 
 		if (shouldCache)
 		{
@@ -296,7 +265,7 @@ public class RTClient
 	{
 		Genres.Clear();
 		
-		var genresCacheFile = Path.Combine(_archiveCachePath, "genres.json");
+		var genresCacheFile = Path.Combine(Storage.CachePath, "genres.json");
 		if (File.Exists(genresCacheFile))
 		{
 			using (var fileStream = File.OpenRead(genresCacheFile))
@@ -341,7 +310,7 @@ public class RTClient
 	{
 		Channels.Clear();
 		
-		var channelsCacheFile = Path.Combine(_archiveCachePath, "channels.json");
+		var channelsCacheFile = Path.Combine(Storage.CachePath, "channels.json");
 		if (File.Exists(channelsCacheFile))
 		{
 			using (var fileStream = File.OpenRead(channelsCacheFile))
@@ -400,7 +369,7 @@ public class RTClient
 	{
 		Shows.Clear();
 		
-		var showsCacheFile = Path.Combine(_archiveCachePath, "shows.json");
+		var showsCacheFile = Path.Combine(Storage.CachePath, "shows.json");
 		if (File.Exists(showsCacheFile))
 		{
 			using (var fileStream = File.OpenRead(showsCacheFile))

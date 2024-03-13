@@ -6,20 +6,8 @@ using RTArchiver.Data;
 using RunProcessAsTask;
 using Serilog;
 
-// Initialize logger.
-var loggerPath = Path.Combine(RTClient.ArchivePath, "logs");
-if (Directory.Exists(loggerPath) == false)
-{
-	Directory.CreateDirectory(loggerPath);
-}
-
-Log.Logger = new LoggerConfiguration()
-	.WriteTo.Debug()
-	.WriteTo.File(Path.Combine(loggerPath, "rt_archiver_.log"), rollingInterval: RollingInterval.Day)
-	.CreateLogger();
-
+Storage.Init();
 Console.WriteLine("~~ Rooster Teeth Archiver ~~");
-
 
 
 
@@ -445,6 +433,7 @@ while (true)
 		{
 			if (File.Exists(downloadItem.LocalPath))
 			{
+				Log.Information($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
 				Console.WriteLine($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
 				return;
 			}
@@ -452,8 +441,8 @@ while (true)
 			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
 			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
 			var localFilename = Path.Combine(downloadItem.LocalPath);
+			Log.Information($"Downloading {localFilename}");
 			Console.WriteLine($"Downloading {localFilename}");
-			
 			try
 			{
 				var processResults = await ProcessEx.RunAsync("yt-dlp", $"-o \"{tempFile}\" --no-progress  --merge-output-format mkv --embed-subs --sub-langs all --write-description --write-info-json --write-thumbnail \"{downloadItem.RemoteManifestPath}\"");
@@ -486,6 +475,7 @@ while (true)
 	}
 	else
 	{
+		Log.Information("Could not find anything to download.");
 		Console.WriteLine("Could not find anything to download.");
 	}
 	

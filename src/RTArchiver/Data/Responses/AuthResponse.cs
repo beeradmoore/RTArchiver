@@ -41,7 +41,7 @@ public class AuthResponse
 
 	public static string AuthFile()
 	{
-		return Path.Combine(RTClient.ArchivePath, "auth.json");
+		return Path.Combine(Storage.ArchivePath, "auth.json");
 	}
 
 	public void Save()
