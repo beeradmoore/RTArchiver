@@ -512,77 +512,80 @@ public class RTClient
 
 	public async Task<List<Episode>> GetEpisodes(Season season)
 	{
-		// TODO: pagination?
-		var episodes = new List<Episode>();
-		var episodeResponse = await GetAPIRequest<EpidsodesResponse>(season.Links.Episodes);
-		if (episodeResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Episode, EpisodesResponse>(season.Links.Episodes);
+		if (response.Success)
 		{
-			episodes.AddRange(episodeResponse.Data);
+			return response.Items;
 		}
-
-		return episodes;
+		else
+		{
+			Console.WriteLine("Error: Could not load episodes.");
+			Log.Error("Could not load episodes.");
+			return new List<Episode>();
+		}
 	}
 	
 	public async Task<List<Episode>> GetEpisodes(Channel channel)
 	{
-		// TODO: pagination?
-		var episodes = new List<Episode>();
-
-		var page = 1;
-		EpidsodesResponse episodeResponse;
-		do
+		var response = await GetPaginatedAPIRequest<Episode, EpisodesResponse>(channel.Links.Episodes);
+		if (response.Success)
 		{
-			episodeResponse = await GetAPIRequest<EpidsodesResponse>(channel.Links.Episodes, page: page);
-			if (episodeResponse?.Data != null)
-			{
-				episodes.AddRange(episodeResponse.Data);
-			}
-
-			++page;
-		} while (page - 1 < episodeResponse?.TotalPages);
-		
-		return episodes;
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load episodes.");
+			Log.Error("Could not load episodes.");
+			return new List<Episode>();
+		}
 	}
 	
 	
 	
 	public async Task<List<BonusFeature>> GetBonusFeatures(Show show)
 	{
-		// TODO: pagination?
-		var bonusFeatures = new List<BonusFeature>();
-		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>(show.Links.BonusFeatures);
-		if (bonusFeaturesResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<BonusFeature, BonusFeaturesResponse>(show.Links.BonusFeatures);
+		if (response.Success)
 		{
-			bonusFeatures.AddRange(bonusFeaturesResponse.Data);
+			return response.Items;
 		}
-
-		return bonusFeatures;
+		else
+		{
+			Console.WriteLine("Error: Could not load bonus features.");
+			Log.Error("Could not load bonus features.");
+			return new List<BonusFeature>();
+		}
 	}
 	
 	public async Task<List<Video>> GetVideos(Episode episode)
 	{
-		// TODO: pagination?
-		var videos = new List<Video>();
-		var videosResponse = await GetAPIRequest<VideosResponse>(episode.Links.Videos);
-		if (videosResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Video, VideosResponse>(episode.Links.Videos);
+		if (response.Success)
 		{
-			videos.AddRange(videosResponse.Data);
+			return response.Items;
 		}
-
-		return videos;
+		else
+		{
+			Console.WriteLine("Error: Could not load videos.");
+			Log.Error("Could not load videos.");
+			return new List<Video>();
+		}
 	}
 	
 	public async Task<List<Video>> GetVideos(BonusFeature bonusFeature)
 	{
-		// TODO: pagination?
-		var videos = new List<Video>();
-		var videosResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
-		if (videosResponse?.Data != null)
+		
+		var response = await GetPaginatedAPIRequest<Video, VideosResponse>(bonusFeature.Links.Videos);
+		if (response.Success)
 		{
-			videos.AddRange(videosResponse.Data);
+			return response.Items;
 		}
-
-		return videos;
+		else
+		{
+			Console.WriteLine("Error: Could not load videos.");
+			Log.Error("Could not load videos.");
+			return new List<Video>();
+		}
 	}
 	
 	
