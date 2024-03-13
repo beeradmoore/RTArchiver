@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace RTArchiver.Data.Responses;
 
-public class BaseResponse<T>
+public abstract class BaseResponse<T>
 {
 	[JsonPropertyName("data")]
 	public List<T> Data { get; set; } = new List<T>();

@@ -124,40 +124,17 @@ public class RTClient
 		}
 	}
 
-	/*
-	async Task<TResponse?> GetAllAPIRequest<TResponse>(string url) where TResponse : VideosResponse, BonusFeaturesResponse
+	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, string order = "asc", bool useAuth = true)
 	{
-		var page = 1;
-		TResponse? firstResponse = default(TResponse);
-		TResponse response;
-		do
-		{
-			response = await GetAPIRequest<TResponse>(url, page, 5);
-			if (firstResponse == null)
-			{
-				firstResponse = response;
-			}
-			else
-			{
-				firstResponse.Data.AddRange(response.Data);
-			}
-
-
-			++page;
-		} while (page <= response?.TotalPages);
+		// RT API caps out at 1000 per page
+		var perPage = 1000;
 		
-
-		return firstResponse;
-	}
-	*/
-
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 1000, string order = "asc", bool useAuth = true)
-	{
 		// Some api endpoints are just /api/v1/doStuff, so if one gets past here we add the svod-be address.
 		if (url.StartsWith("/api/v1/"))
 		{
 			url = $"https://svod-be.roosterteeth.com{url}";
 		}
+		
 		
 		var shouldCache = false;
 		
@@ -175,6 +152,8 @@ public class RTClient
 			url += $"per_page={perPage}&page={page}&order={order}";
 			shouldCache = true;
 		}
+		
+		Log.Information($"Request: {url}, page: {page}, perPage: {perPage}, order: {order}, useAuth: {useAuth}");
 
 		var uri = new Uri(url);
 
@@ -255,6 +234,49 @@ public class RTClient
 			}
 		}
 	}
+	
+	async Task<(bool Success, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string url) where TResponse : BaseResponse<T>
+	{
+		var retries = 0;
+		var maxRetries = 5;
+		
+		var items = new List<T>();
+		var currentPage = 1;
+		
+		TResponse? response = null;
+		do
+		{
+			try
+			{
+				response = await GetAPIRequest<TResponse>(url, page: currentPage);
+				if (response == null)
+				{
+					throw new Exception("Response object was null");
+				}
+				
+				items.AddRange(response.Data);
+				++currentPage;
+			}
+			catch (Exception err)
+			{
+				++retries;
+				Log.Error(err, $"API Error, retries: {retries}, currentPage: {currentPage}, url: {url}");
+				
+				// Wait 5 seconds before trying again.
+				await Task.Delay(5000);
+			}
+			
+			// Sometimes TotalPages is incorrect, and sometimes TotalResults is incorrect so we have to check both and hope for the best -_-
+		} while (retries < maxRetries && currentPage <= response?.TotalPages && items.Count < response?.TotalResults);
+
+		if (retries > maxRetries)
+		{
+			Log.Error($"Could not get all pages for url {url}");
+			return (false, new List<T>());
+		}
+		
+		return (true, items);
+	}
 
 	public async Task<MeResponse?> GetMe()
 	{
@@ -264,7 +286,8 @@ public class RTClient
 	public async Task<List<Genre>> GetGenres()
 	{
 		Genres.Clear();
-		
+
+		// Load from cache file.
 		var genresCacheFile = Path.Combine(Storage.CachePath, "genres.json");
 		if (File.Exists(genresCacheFile))
 		{
@@ -282,11 +305,12 @@ public class RTClient
 				}
 			}
 		}
-		
-		var genresResponse = await GetAPIRequest<GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
-		if (genresResponse is not null)
+
+	
+		var response = await GetPaginatedAPIRequest<Genre, GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
+		if (response.Success)
 		{
-			foreach (var genre in genresResponse.Data)
+			foreach (var genre in response.Items)
 			{
 				if (Genres.ContainsKey(genre.Slug))
 				{
@@ -297,7 +321,14 @@ public class RTClient
 				Genres[genre.Slug] = genre;
 			}
 		}
+		else
+		{
+			Console.WriteLine("Error: Could not load genres.");
+			Log.Error("Could not load genres.");
+			return new List<Genre>();
+		}
 		
+		// Save to cache file.
 		using (var fileStream = File.Create(genresCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Genres, new JsonSerializerOptions() { WriteIndented = true });
@@ -310,6 +341,7 @@ public class RTClient
 	{
 		Channels.Clear();
 		
+		// Load from cache file.
 		var channelsCacheFile = Path.Combine(Storage.CachePath, "channels.json");
 		if (File.Exists(channelsCacheFile))
 		{
@@ -322,53 +354,45 @@ public class RTClient
 					{
 						Channels[tempChannel.Key] = tempChannel.Value;
 					}
-
 					return Channels.Values.ToList();
 				}
 			}
 		}
 		
-		var channels  = new List<Channel>();
-
-		var page = 1;
-		ChannelsResponse? channelsResponse;
-		do
+		var response = await GetPaginatedAPIRequest<Channel, ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels");
+		if (response.Success)
 		{
-			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, useAuth: false);
-
-			//Console.WriteLine($"Loaded page {page}, page: {channelsResponse.Page}, perPage: {channelsResponse.PerPage}, totalPages: {channelsResponse.TotalPages}, totalResults: {channelsResponse.TotalResults}");
-			if (channelsResponse != null)
+			foreach (var channel in response.Items)
 			{
-				channels.AddRange(channelsResponse.Data);
-				++page;
+				if (Channels.ContainsKey(channel.Slug))
+				{
+					Log.Error($"Duplicate channel key found, {channel.Slug}");
+					Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
+				}
+				Channels[channel.Slug] = channel;
 			}
-
-			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page - 1 < channelsResponse?.TotalPages);
-
-		foreach (var channel in channels)
+		}
+		else
 		{
-			if (Channels.ContainsKey(channel.Slug))
-			{
-				Log.Error($"Duplicate channel key found, {channel.Slug}");
-				Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
-			}
-			Channels[channel.Slug] = channel;
+			Console.WriteLine("Error: Could not load channels.");
+			Log.Error("Could not load channels.");
+			return new List<Channel>();
 		}
 		
+		// Save file to cache.
 		using (var fileStream = File.Create(channelsCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Channels, new JsonSerializerOptions() { WriteIndented = true });
 		}
 
-		return channels;
+		return Channels.Values.ToList();
 	}
 
 	public async Task<List<Show>> GetShows()
 	{
 		Shows.Clear();
 		
+		// Load from cache file
 		var showsCacheFile = Path.Combine(Storage.CachePath, "shows.json");
 		if (File.Exists(showsCacheFile))
 		{
@@ -387,72 +411,95 @@ public class RTClient
 			}
 		}
 		
-		var shows = new List<Show>();
-
-		var page = 1;
-		ShowsResponse? showsResponse;
-		do
+		
+		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/channels");
+		if (response.Success)
 		{
-			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page);
-
-			//Console.WriteLine($"Loaded page {page}, page: {showsResponse.Page}, perPage: {showsResponse.PerPage}, totalPages: {showsResponse.TotalPages}, totalResults: {showsResponse.TotalResults}");
-			if (showsResponse != null)
+			foreach (var show in response.Items)
 			{
-				shows.AddRange(showsResponse.Data);
-				++page;
+				if (Shows.ContainsKey(show.Slug))
+				{
+					Log.Error($"Duplicate show key found, {show.Slug}");
+					Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
+				}
+				Shows[show.Slug] = show;
 			}
-
-			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page - 1 < showsResponse?.TotalPages);
-
-		foreach (var show in shows)
+		}
+		else
 		{
-			if (Shows.ContainsKey(show.Slug))
-			{
-				Log.Error($"Duplicate show key found, {show.Slug}");
-				Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
-			}
-
-			Shows[show.Slug] = show;
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Show>();
 		}
 		
+		// Save to cache file
 		using (var fileStream = File.Create(showsCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Shows, new JsonSerializerOptions() { WriteIndented = true });
 		}
 		
-		return shows;
+		return Shows.Values.ToList();
 	}
 	
 	
 	public async Task<List<Show>> GetShows(Channel channel)
 	{
-		var shows = new List<Show>();
-		var showsResponse = await GetAPIRequest<ShowsResponse>(channel.Links.Shows);
-		if (showsResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>(channel.Links.Shows);
+		if (response.Success)
 		{
-			shows.AddRange(showsResponse.Data);
+			return response.Items;
 		}
-		return shows;
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Show>();
+		}
 	}
 
 	public async Task<List<Season>> GetSeasons(string showSlug)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
-		return seasonsResponse?.Data ?? new List<Season>();
+		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Season>();
+		}
 	}
 	
 	public async Task<List<Season>> GetSeasons(Show show)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>(show.Links.Seasons);
-		return seasonsResponse?.Data ?? new List<Season>();
+		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>(show.Links.Seasons);
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Season>();
+		}
 	}
 	
 	public async Task<List<BonusFeature>> GetBonusFeatures(string showSlug)
 	{
-		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
-		return bonusFeaturesResponse?.Data ?? new List<BonusFeature>();
+		var response = await GetPaginatedAPIRequest<BonusFeature, BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<BonusFeature>();
+		}
 	}
 		
 	public async Task<List<DownloadItem>> GetDownloadItemsForEverything(Channel channel, Show show)
@@ -638,11 +685,6 @@ public class RTClient
 
 	public async Task CacheGoBrrrr()
 	{
-		/*
-		var response = await GetAllAPIRequest<BaseResponse<object>>("https://svod-be.roosterteeth.com/api/v1/shows/camp-camp");
-		Debugger.Break();
-		*/
-		
 		foreach (var channel in Channels.Values)
 		{
 			
