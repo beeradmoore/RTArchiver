@@ -2,12 +2,14 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection.Metadata;
 using System.Text.Json;
 using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
 using RTArchiver.Extensions;
 using Serilog;
+using Serilog.Core;
 
 namespace RTArchiver;
 
@@ -128,6 +130,12 @@ public class RTClient
 	{
 		// RT API caps out at 1000 per page
 		var perPage = 1000;
+
+		// Skip requests to the store.
+		if (url.StartsWith("https://store.roosterteeth.com"))
+		{
+			return default(TResponse);
+		}
 		
 		// Some api endpoints are just /api/v1/doStuff, so if one gets past here we add the svod-be address.
 		if (url.StartsWith("/api/v1/"))
@@ -237,6 +245,20 @@ public class RTClient
 	
 	async Task<(bool Success, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string url) where TResponse : BaseResponse<T>
 	{
+		// If it is a store link for some reason we just say yep thanks awesome, have a great day.
+		if (url.StartsWith("https://store.roosterteeth.com"))
+		{
+			return (true, new List<T>());
+		}
+		
+		// If it is a brightcove link for some reason we just say yep thanks awesome, have a great day.
+		if (url.StartsWith("https://playback.brightcovecdn.com"))
+		{
+			return (true, new List<T>());
+		}
+		
+		
+		
 		var retries = 0;
 		var maxRetries = 5;
 		
@@ -688,6 +710,136 @@ public class RTClient
 
 	public async Task CacheGoBrrrr()
 	{
+		// Start with a single link, and then find more over time.
+		var linksToCache = new List<string>()
+		{
+			"/api/v1/channels"
+		};
+		
+		// If it has already been cached we don't need to check it again.
+		var cachedLinksQueueReference = new Dictionary<string, int>();
+
+		void ParseGenericLinkString(string str)
+		{
+			// Skip when there are no links.
+			if (string.IsNullOrEmpty(str) == true)
+			{
+				return;
+			}
+
+			if (cachedLinksQueueReference.ContainsKey(str) == true)
+			{
+				// Increment this number, for statistical fun.
+				++cachedLinksQueueReference[str];
+				return;
+			}
+
+			// Add it to the queue so we don't add it again
+			cachedLinksQueueReference[str] = 1;
+
+			// Then actually add it to the list so it does get handled.
+			linksToCache.Add(str);
+		}
+
+		for (int i = 0; i < linksToCache.Count; ++i)
+		{
+			var linkToCache = linksToCache[i];
+			var response = await GetPaginatedAPIRequest<GenericLink, GenericLinksResponse>(linkToCache);
+			if (response.Success)
+			{
+				if (cachedLinksQueueReference.ContainsKey(linkToCache) == true)
+				{
+					// Increment this number, for statistical fun.
+					++cachedLinksQueueReference[linkToCache];
+				}
+				else
+				{
+					cachedLinksQueueReference[linkToCache] = 1;
+				}
+				
+				foreach (var genericLink in response.Items)
+				{
+					foreach (var genericLinkDictionary in genericLink.Links)
+					{
+						// Skip self links
+						if (genericLinkDictionary.Key == "self")
+						{
+							continue;
+						}
+						
+						/*
+						// Skip next links
+						if (genericLinkDictionary.Key == "next")
+						{
+							// TODO: Log these
+							Log.Warning($"NEXT: {genericLinkDictionary.Value as string}");
+							continue;
+						}
+						*/
+
+						
+						// Sometimes this value is null.
+						if (genericLinkDictionary.Value == null)
+						{
+							continue;
+						}
+						
+						// Sometimes this value is a string
+						if (genericLinkDictionary.Value is JsonElement jsonElement)
+						{
+							if (jsonElement.ValueKind == JsonValueKind.String)
+							{
+								ParseGenericLinkString(jsonElement.GetString() ?? string.Empty);
+								continue;
+							}
+
+							if (jsonElement.ValueKind == JsonValueKind.Object)
+							{
+								var dictionary = jsonElement.Deserialize<Dictionary<string, string>>();
+								if (dictionary != null)
+								{
+									foreach (var subDictionaryItem in dictionary)
+									{
+										// Skip self links
+										if (subDictionaryItem.Key == "self")
+										{
+											continue;
+										}
+
+										// Sometimes this value is null.
+										if (string.IsNullOrEmpty(subDictionaryItem.Value) == true)
+										{
+											continue;
+										}
+										
+										ParseGenericLinkString(subDictionaryItem.Value);
+									}
+
+									continue;
+								}
+							}
+
+							Debugger.Break();
+						}
+					}
+				}
+			}
+			else
+			{
+				// If we failed we stop.
+				Console.WriteLine("Error: Could not make the cache go brr.");
+				Log.Error("Could not make the cache go brr.");
+				break;
+			}
+			
+			// Give servers a 50ms break.
+			// await Task.Delay(50);
+		}
+		
+		
+		
+		
+		/*
 		foreach (var channel in Channels.Values)
 		{
 			
@@ -739,6 +891,6 @@ public class RTClient
 			}
 			
 		}
-		
+		*/
 	}
 }
