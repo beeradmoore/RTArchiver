@@ -119,7 +119,7 @@ var meResponse = await rtClient.GetMe();
 Console.WriteLine($"Welcome {meResponse?.Attributes.Username}");
 
 
-
+await rtClient.CacheGoBrrrr();
 
 Console.WriteLine("\nLoading genres");
 var genres = await rtClient.GetGenres();
@@ -154,7 +154,6 @@ if (shows.Count > 0)
 */
 
 
-//await rtClient.CacheGoBrrrr();
 
 Channel? SelectChannel()
 {
