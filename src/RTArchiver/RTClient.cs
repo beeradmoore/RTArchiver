@@ -7,6 +7,7 @@ using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
 using RTArchiver.Extensions;
+using Serilog;
 
 namespace RTArchiver;
 
@@ -38,6 +39,7 @@ public class RTClient
 		}
 		catch (Exception err)
 		{
+			Log.Error(err, $"Could not create ArchivePath {ArchivePath}");
 			Console.WriteLine($"Error: Could not create ArchivePath {ArchivePath}");
 			Console.WriteLine(err.Message);
 			Environment.Exit(1);
@@ -78,6 +80,7 @@ public class RTClient
 			var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
 			if (authResponse == null)
 			{
+				Log.Error("Could not get a valid response from the server.");
 				Console.WriteLine("Error: Could not get a valid response from the server.");
 				Logout();
 				return false;
@@ -85,6 +88,7 @@ public class RTClient
 
 			if (string.IsNullOrEmpty(authResponse.Error) == false)
 			{
+				Log.Error($"Could not log in. ({authResponse.Error})");
 				Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
 				Console.WriteLine(authResponse.ErrorDescription);
 				Console.WriteLine(authResponse.ExtraInfo);
@@ -98,6 +102,7 @@ public class RTClient
 		}
 		catch (Exception err)
 		{
+			Log.Error(err, $"Could not log in");
 			Console.WriteLine("Error: Could not log in.");
 			Console.WriteLine(err.Message);
 			Logout();
@@ -120,6 +125,7 @@ public class RTClient
 			var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
 			if (authResponse == null)
 			{
+				Log.Error("Could not get a valid response from the server.");
 				Console.WriteLine("Error: Could not get a valid response from the server.");
 				Logout();
 				return false;
@@ -127,6 +133,7 @@ public class RTClient
 
 			if (string.IsNullOrEmpty(authResponse.Error) == false)
 			{
+				Log.Error($"Could not log in. ({authResponse.Error})");
 				Console.WriteLine($"Error: Could not log in. ({authResponse.Error})");
 				Console.WriteLine(authResponse.ErrorDescription);
 				Console.WriteLine(authResponse.ExtraInfo);
@@ -140,6 +147,7 @@ public class RTClient
 		}
 		catch (Exception err)
 		{
+			Log.Error(err, $"Could not log in");
 			Console.WriteLine("Error: Could not log in.");
 			Console.WriteLine(err.Message);
 			Logout();
@@ -224,6 +232,7 @@ public class RTClient
 			}
 			catch (Exception err)
 			{
+				Log.Error(err, $"Could not load request from disk, {requestCacheFile}");
 				Console.WriteLine($"Error: Could not load request from disk, {requestCacheFile}");
 				Console.WriteLine(err.Message);
 			}
@@ -259,6 +268,7 @@ public class RTClient
 					}
 					catch (Exception err)
 					{
+						Log.Error(err, $"Could not save request to disk, {requestCacheFile}");
 						Console.WriteLine($"Error: Could not save request to disk, {requestCacheFile}");
 						Console.WriteLine(err.Message);
 					}
@@ -311,6 +321,7 @@ public class RTClient
 			{
 				if (Genres.ContainsKey(genre.Slug))
 				{
+					Log.Error($"Duplicate genre key found, {genre.Slug}");
 					Console.WriteLine($"Error: Duplicate genre key found, {genre.Slug}");
 				}
 
@@ -371,6 +382,7 @@ public class RTClient
 		{
 			if (Channels.ContainsKey(channel.Slug))
 			{
+				Log.Error($"Duplicate channel key found, {channel.Slug}");
 				Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
 			}
 			Channels[channel.Slug] = channel;
@@ -429,6 +441,7 @@ public class RTClient
 		{
 			if (Shows.ContainsKey(show.Slug))
 			{
+				Log.Error($"Duplicate show key found, {show.Slug}");
 				Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
 			}
 

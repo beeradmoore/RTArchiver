@@ -4,8 +4,24 @@ using System.Text.Json;
 using RTArchiver;
 using RTArchiver.Data;
 using RunProcessAsTask;
+using Serilog;
+
+// Initialize logger.
+var loggerPath = Path.Combine(RTClient.ArchivePath, "logs");
+if (Directory.Exists(loggerPath) == false)
+{
+	Directory.CreateDirectory(loggerPath);
+}
+
+Log.Logger = new LoggerConfiguration()
+	.WriteTo.Debug()
+	.WriteTo.File(Path.Combine(loggerPath, "rt_archiver_.log"), rollingInterval: RollingInterval.Day)
+	.CreateLogger();
 
 Console.WriteLine("~~ Rooster Teeth Archiver ~~");
+
+
+
 
 var hasLaunchWarnings = false;
 
@@ -20,6 +36,7 @@ try
 }
 catch (Exception err)
 {
+	Log.Warning(err, "Could not detect ffmpeg");
 	Console.WriteLine("Warning: ffmpeg");
 	Console.WriteLine(err.Message);
 	Console.WriteLine("Make sure ffmpeg is installed.");
@@ -42,6 +59,7 @@ try
 }
 catch (Exception err)
 {
+	Log.Warning(err, "Could not detect yt-dlp");
 	Console.WriteLine("Warning: yt-dlp");
 	Console.WriteLine(err.Message);
 	Console.WriteLine("Make sure yt-dlp is installed.");
@@ -433,7 +451,8 @@ while (true)
 			
 			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
 			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
-			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
+			var localFilename = Path.Combine(downloadItem.LocalPath);
+			Console.WriteLine($"Downloading {localFilename}");
 			
 			try
 			{
@@ -459,6 +478,7 @@ while (true)
 			}
 			catch (Exception err)
 			{
+				Log.Error(err, $"Could not download {localFilename}");
 				Console.WriteLine($"Error: {err.Message}");
 				//Debugger.Break();
 			}
