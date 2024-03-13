@@ -4,8 +4,12 @@ using System.Text.Json;
 using RTArchiver;
 using RTArchiver.Data;
 using RunProcessAsTask;
+using Serilog;
 
+Storage.Init();
 Console.WriteLine("~~ Rooster Teeth Archiver ~~");
+
+
 
 var hasLaunchWarnings = false;
 
@@ -20,6 +24,7 @@ try
 }
 catch (Exception err)
 {
+	Log.Warning(err, "Could not detect ffmpeg");
 	Console.WriteLine("Warning: ffmpeg");
 	Console.WriteLine(err.Message);
 	Console.WriteLine("Make sure ffmpeg is installed.");
@@ -42,6 +47,7 @@ try
 }
 catch (Exception err)
 {
+	Log.Warning(err, "Could not detect yt-dlp");
 	Console.WriteLine("Warning: yt-dlp");
 	Console.WriteLine(err.Message);
 	Console.WriteLine("Make sure yt-dlp is installed.");
@@ -427,14 +433,16 @@ while (true)
 		{
 			if (File.Exists(downloadItem.LocalPath))
 			{
+				Log.Information($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
 				Console.WriteLine($"File exist, skipping. {Path.GetFileName(downloadItem.LocalPath)}");
 				return;
 			}
 			
 			// TODO: Check for m3u8, if its m3u8 save as mp4, otherwise this could be an image.
 			var tempFile = Path.Combine(tempPath, Guid.NewGuid().ToString("D"));
-			Console.WriteLine($"Downloading {Path.Combine(downloadItem.LocalPath)}");
-			
+			var localFilename = Path.Combine(downloadItem.LocalPath);
+			Log.Information($"Downloading {localFilename}");
+			Console.WriteLine($"Downloading {localFilename}");
 			try
 			{
 				var processResults = await ProcessEx.RunAsync("yt-dlp", $"-o \"{tempFile}\" --no-progress  --merge-output-format mkv --embed-subs --sub-langs all --write-description --write-info-json --write-thumbnail \"{downloadItem.RemoteManifestPath}\"");
@@ -459,6 +467,7 @@ while (true)
 			}
 			catch (Exception err)
 			{
+				Log.Error(err, $"Could not download {localFilename}");
 				Console.WriteLine($"Error: {err.Message}");
 				//Debugger.Break();
 			}
@@ -466,6 +475,7 @@ while (true)
 	}
 	else
 	{
+		Log.Information("Could not find anything to download.");
 		Console.WriteLine("Could not find anything to download.");
 	}
 	

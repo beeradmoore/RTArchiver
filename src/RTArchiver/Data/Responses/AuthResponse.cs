@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Serilog;
 
 namespace RTArchiver.Data.Responses;
 
@@ -40,7 +41,7 @@ public class AuthResponse
 
 	public static string AuthFile()
 	{
-		return Path.Combine(RTClient.ArchivePath, "auth.json");
+		return Path.Combine(Storage.ArchivePath, "auth.json");
 	}
 
 	public void Save()
@@ -48,6 +49,7 @@ public class AuthResponse
 		if (string.IsNullOrEmpty(AccessToken) || string.IsNullOrEmpty(RefreshToken))
 		{
 			Console.WriteLine("Error: Could not save AuthResponse, no AccessToken or RefreshToken found.");
+			Log.Error("Could not save AuthResponse, no AccessToken or RefreshToken found.");
 			return;
 		}
 
@@ -60,6 +62,7 @@ public class AuthResponse
 		}
 		catch (Exception err)
 		{
+			Log.Error(err, "Unable to save AuthResponse");
 			Console.WriteLine("Error: Unable to save AuthResponse.");
 			Console.WriteLine(err.Message);
 		}
@@ -84,6 +87,7 @@ public class AuthResponse
 		}
 		catch (Exception err)
 		{
+			Log.Error(err, "Unable deserialize AuthResponse");
 			Console.WriteLine("Error: Unable deserialize AuthResponse.");
 			Console.WriteLine(err.Message);
 			return null;
