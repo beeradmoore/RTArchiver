@@ -8,6 +8,7 @@ public class Storage
 	public static string CachePath { get; private set; } = string.Empty;
 	public static string LogsPath { get; private set; } = string.Empty;
 	public static string VideosPath { get; private set; } = string.Empty;
+	public static string DatabasePath { get; private set; } = string.Empty;
 
 
 	static Storage()
@@ -32,6 +33,8 @@ public class Storage
 		var cachePath = Path.Combine(archivePath, "cache");
 		var logsPath = Path.Combine(archivePath, "logs");
 		var videosPath = Path.Combine(archivePath, "videos");
+		var databasePath = Path.Combine(archivePath, "database");
+		
 		try
 		{
 			if (Directory.Exists(archivePath) == false)
@@ -57,6 +60,12 @@ public class Storage
 				Log.Information($"Creating videos directory {videosPath}");
 				Directory.CreateDirectory(videosPath);
 			}
+		
+			if (Directory.Exists(databasePath) == false)
+			{
+				Log.Information($"Creating database directory {databasePath}");
+				Directory.CreateDirectory(databasePath);
+			}
 			
 			Log.Logger = new LoggerConfiguration()
 				.WriteTo.Debug()
@@ -67,11 +76,13 @@ public class Storage
 			CachePath = cachePath;
 			LogsPath = logsPath;
 			VideosPath = videosPath;
+			DatabasePath = databasePath;
 			
 			Log.Information($"Using archive directory {archivePath}");
 			Log.Information($"Using cache directory {cachePath}");
 			Log.Information($"Using logs directory {logsPath}");
 			Log.Information($"Using videos directory {videosPath}");
+			Log.Information($"Using database directory {databasePath}");
 		}
 		catch (Exception err)
 		{

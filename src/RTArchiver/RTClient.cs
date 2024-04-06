@@ -893,4 +893,208 @@ public class RTClient
 		}
 		*/
 	}
+
+
+	public async Task DownloadSitemapsAsync()
+	{
+		var sitemapSqliteConnection = new SQLiteConnection(Path.Combine(Storage.DatabasePath, "sitemap.db"));
+		
+		// TODO: Backup DB?
+		//_sitemapSqliteConnection.Backup();
+		
+		try
+		{
+			sitemapSqliteConnection.CreateTable<Sitemap>();
+			sitemapSqliteConnection.CreateTable<StaticPage>();
+			sitemapSqliteConnection.CreateTable<VideoUrl>();
+			sitemapSqliteConnection.CreateTable<SiteMapVideo>();
+		}
+		catch (Exception err)
+		{
+			Log.Error(err, $"Could not create sitemap SQLite database.");
+			Debugger.Break();
+			return;
+		}
+
+		
+		var rootSitemap = await DownloadSitemapAsync("https://svod-be.roosterteeth.com/sitemap.xml");
+
+		SitemapIndex? sitemapIndex = null;
+		
+		using (StreamReader reader = new StreamReader(rootSitemap))
+		{
+			var serializer = new XmlSerializer(typeof(SitemapIndex));
+			sitemapIndex = (SitemapIndex)serializer.Deserialize(reader);
+		}
+
+		if (sitemapIndex is null)
+		{
+			Log.Error("Could not load root sitemap.");
+			Debugger.Break();
+			return;
+		}
+
+		foreach (var sitemap in sitemapIndex.Sitemaps)
+		{
+			sitemap.Id = Sitemap.GetIdFromLocation(sitemap.Location);
+			sitemap.Tag = Sitemap.GetTagFromLocation(sitemap.Location);
+			sitemapSqliteConnection.InsertOrReplace(sitemap);
+		}
+		
+		foreach (var sitemap in sitemapIndex.Sitemaps)
+		{
+			var sitemapPath = await DownloadSitemapAsync(sitemap.Location);
+			
+			if (string.IsNullOrEmpty(sitemapPath))
+			{
+				// This error should already have been handled.
+				return;
+			}
+			
+			var stopwatch = new Stopwatch();
+			stopwatch.Start();
+			
+			Log.Information($"{sitemap.Tag} - starting");
+			
+			if (sitemap.Tag == "static-pages")
+			{
+				StaticPageSet? staticPageSet = null;
+				using (StreamReader reader = new StreamReader(sitemapPath))
+				{
+					var serializer = new XmlSerializer(typeof(StaticPageSet));
+					staticPageSet = (StaticPageSet)serializer.Deserialize(reader);
+				}
+
+				if (staticPageSet is null)
+				{
+					Log.Error($"Could not load sitemap - {sitemapPath}");
+					Debugger.Break();
+					continue;
+				}
+
+				Log.Information($"{sitemap.Tag} - Found {staticPageSet.Urls.Count} items");
+
+				var dbStaticPages = sitemapSqliteConnection.Table<StaticPage>().ToList();
+				sitemapSqliteConnection.BeginTransaction();
+				foreach (var staticPage in staticPageSet.Urls)
+				{
+					var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
+					
+					if (dbStaticPage is null)
+					{
+						staticPage.Guid = Guid.NewGuid().ToByteArray();
+					}
+					else
+					{
+						staticPage.Guid = dbStaticPage.Guid;
+					}
+					sitemapSqliteConnection.InsertOrReplace(staticPage);
+				}
+				
+				sitemapSqliteConnection.Commit();
+			}
+			else if (sitemap.Tag == "rooster-teeth" ||
+			         sitemap.Tag == "achievement-hunter" ||
+			         sitemap.Tag == "funhaus" ||
+			         sitemap.Tag == "death-battle" ||
+			         sitemap.Tag == "kinda-funny" ||
+			         sitemap.Tag == "friends-of-rt" ||
+			         sitemap.Tag == "rwby-universe" ||
+			         sitemap.Tag == "red-vs-blue-universe" ||
+			         sitemap.Tag == "all-good-no-worries" ||
+			         sitemap.Tag == "best-friends-today" ||
+			         sitemap.Tag == "inside-gaming" ||
+			         sitemap.Tag == "tales-from-the-stinky-dragon" ||
+			         sitemap.Tag == "dogbark" ||
+			         sitemap.Tag == "f-kface" ||
+			         sitemap.Tag == "camp-camp" ||
+			         sitemap.Tag == "red-web")
+			{
+				VideoSet? videoSet = null;
+				using (StreamReader reader = new StreamReader(sitemapPath))
+				{
+					var serializer = new XmlSerializer(typeof(VideoSet));
+					videoSet = (VideoSet)serializer.Deserialize(reader);
+				}
+				
+				//var video = videoSet.Urls.First();
+
+				if (videoSet is null)
+				{
+					Log.Error($"Could not load sitemap - {sitemapPath}");
+					Debugger.Break();
+					continue;
+				}
+				
+				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls.Count} items");
+				
+				var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
+				sitemapSqliteConnection.BeginTransaction();
+				foreach (var videoUrl in videoSet.Urls)
+				{
+					videoUrl.SitemapId = sitemap.Id;
+					videoUrl.SitemapTag = sitemap.Tag;
+					var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
+					if (dbVideoUrl is null)
+					{
+						videoUrl.Guid = Guid.NewGuid().ToByteArray();
+					}
+					else
+					{
+						videoUrl.Guid = dbVideoUrl.Guid;
+					}
+					sitemapSqliteConnection.InsertOrReplace(videoUrl);
+
+					videoUrl.Video.Guid = videoUrl.Guid;
+					sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+				}
+				sitemapSqliteConnection.Commit();
+			}
+			else
+			{
+				Log.Error($"Unknown sitemap tag found - {sitemap.Tag}");
+				Debugger.Break();
+			}
+			
+			stopwatch.Stop();
+			Log.Information($"{sitemap.Tag} - Finished, took {stopwatch.ElapsedMilliseconds}ms");
+		}
+	}
+	
+	async Task<string> DownloadSitemapAsync(string url)
+	{
+		Log.Information($"Downloading sitemap - {url}");
+		var sitemapFile = url.Replace("https://svod-be.roosterteeth.com/", string.Empty, StringComparison.OrdinalIgnoreCase).Replace("/", "_", StringComparison.OrdinalIgnoreCase);
+		var cacheFile = Path.Combine(Storage.CachePath, sitemapFile);
+
+		try
+		{
+			// TODO: Handle cache.
+			/*
+			if (File.Exists(cacheFile))
+			{
+				return cacheFile;
+			}
+			*/
+		
+			var response = await _httpClient.GetAsync(url);
+			response.EnsureSuccessStatusCode();
+			
+			using (var fileStream = File.Create(cacheFile))
+			{
+				using (var stream = await response.Content.ReadAsStreamAsync())
+				{
+					await stream.CopyToAsync(fileStream);
+				}
+			}
+
+			return cacheFile;
+		}
+		catch (Exception err)
+		{
+			Log.Error(err, $"Could not download sitemap - {url}");
+			Debugger.Break();
+			return string.Empty;
+		}
+	}
 }
