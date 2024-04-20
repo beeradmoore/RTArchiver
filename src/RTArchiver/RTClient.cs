@@ -1,13 +1,23 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Specialized;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection.Metadata;
 using System.Text.Json;
+using System.Web;
+using System.Xml.Serialization;
 using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
 using RTArchiver.Extensions;
+using RunProcessAsTask;
 using Serilog;
+using Serilog.Core;
+using SQLite;
 
 namespace RTArchiver;
 
@@ -19,18 +29,29 @@ public class RTClient
 	public Dictionary<string, Genre> Genres { get; } = new Dictionary<string, Genre>();
 	public Dictionary<string, Show> Shows { get; } = new Dictionary<string, Show>();
 	public Dictionary<string, Channel> Channels { get; } = new Dictionary<string, Channel>();
-	
 
+	public SQLiteConnection CacheSQLiteConnection { get; init; }
+
+	public int NumberOfThreads { get; set; } = Environment.ProcessorCount;
+
+	public bool UseCache { get; set; } = true;
+	
 	public RTClient()
 	{
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
 		_httpClient.DefaultRequestHeaders.Add("client-type", "web");
+		_httpClient.BaseAddress = new Uri("https://svod-be.roosterteeth.com");
 
 		var authResponse = AuthResponse.Load();
 		if (authResponse is not null)
 		{
 			_authResponse = authResponse;
 		}
+
+		CacheSQLiteConnection = new SQLiteConnection(Path.Combine(Storage.DatabasePath, "cache.db"), 
+			SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+
+		CacheSQLiteConnection.CreateTable<CacheItem>();
 	}
 
 
@@ -50,7 +71,7 @@ public class RTClient
 			if (authResponse == null)
 			{
 				Log.Error("Could not get a valid response from the server.");
-				Console.WriteLine("Error: Could not get a valid response from the server.");
+				//ine("Error: Could not get a valid response from the server.");
 				Logout();
 				return false;
 			}
@@ -124,147 +145,368 @@ public class RTClient
 		}
 	}
 
-	/*
-	async Task<TResponse?> GetAllAPIRequest<TResponse>(string url) where TResponse : VideosResponse, BonusFeaturesResponse
+	object _diskIOLock = new object();
+	async Task<TResponse?> GetAPIRequest<TResponse>(string endpoint, int page = 1, bool useAuth = true)
 	{
-		var page = 1;
-		TResponse? firstResponse = default(TResponse);
-		TResponse response;
-		do
-		{
-			response = await GetAPIRequest<TResponse>(url, page, 5);
-			if (firstResponse == null)
-			{
-				firstResponse = response;
-			}
-			else
-			{
-				firstResponse.Data.AddRange(response.Data);
-			}
-
-
-			++page;
-		} while (page <= response?.TotalPages);
+		var guid = Guid.NewGuid().ToString("D");
+		var stopwatch = new Stopwatch();
+		stopwatch.Start();
+		Log.Information($"{guid} GetAPIRequest: {endpoint}, page {page}, useAuth: {useAuth}");
 		
-
-		return firstResponse;
-	}
-	*/
-
-	async Task<TResponse?> GetAPIRequest<TResponse>(string url, int page = 1, int perPage = 1000, string order = "asc", bool useAuth = true)
-	{
-		// Some api endpoints are just /api/v1/doStuff, so if one gets past here we add the svod-be address.
-		if (url.StartsWith("/api/v1/"))
+		if (endpoint.StartsWith("http"))
 		{
-			url = $"https://svod-be.roosterteeth.com{url}";
+			Debugger.Break();
+		}
+			
+		//endpoint += "/sda/213odfs?gfda=dai9&thing=that&tha=dsa";
+		
+		
+		var modifiedQueryArguments = string.Empty;
+		var modifiedEndpoint = endpoint;
+		var indexOfQueryString = modifiedEndpoint.IndexOf("?", StringComparison.OrdinalIgnoreCase);
+		if (indexOfQueryString > 0)
+		{
+			modifiedQueryArguments = modifiedEndpoint.Substring(indexOfQueryString + 1);
+			modifiedEndpoint = modifiedEndpoint.Substring(0, indexOfQueryString);
 		}
 		
-		var shouldCache = false;
 		
-		if (url.StartsWith("https://svod-be.roosterteeth.com"))
-		{
-			if (url.Contains("?", StringComparison.InvariantCultureIgnoreCase))
-			{
-				url += "&";
-			}
-			else
-			{
-				url += "?";
-			}
+		var endpointUrlSplit = modifiedEndpoint.Split("/", StringSplitOptions.RemoveEmptyEntries);
+		var cacheDirectory = endpointUrlSplit[0..^1];
+		var cacheFileName = $"{endpointUrlSplit[^1]}_page-{page}";
 
-			url += $"per_page={perPage}&page={page}&order={order}";
-			shouldCache = true;
+		var queryArguments = HttpUtility.ParseQueryString(modifiedQueryArguments);
+		if (queryArguments.Count > 0)
+		{
+			queryArguments.Remove("page");
+			queryArguments.Remove("per_page");
+			queryArguments.Remove("order");
+			queryArguments.Remove("order_by");
+			
+			foreach (var nameValueKey in queryArguments.AllKeys)
+			{
+				if (nameValueKey is null)
+				{
+					continue;
+				}
+				
+				var nameValueValue = queryArguments[nameValueKey];
+
+				if (string.IsNullOrWhiteSpace(nameValueValue))
+				{
+					continue;
+				}
+				
+				cacheFileName += $"_{nameValueKey}-{nameValueValue}";
+			}
 		}
 
-		var uri = new Uri(url);
+		cacheFileName += ".json";
 
-		var requestCacheFile = uri.AbsolutePath;
-		if (requestCacheFile.StartsWith("/"))
-		{
-			requestCacheFile = requestCacheFile.Substring(1);
-		}
-		requestCacheFile += $"_page{page.ToString().PadLeft(2, '0')}.json";
+		var fullCacheDirectory = Path.Combine(Storage.CachePath, string.Join(Path.DirectorySeparatorChar, cacheDirectory));
+		var fullCacheFileName = Path.Combine(fullCacheDirectory, cacheFileName);
+
+		var cacheFileExists = File.Exists(fullCacheFileName);
+
 		
-		var requestCachePath = Path.Combine(Storage.CachePath, requestCacheFile);
+		queryArguments.Add("page", page.ToString());
+		queryArguments.Add("per_page", "1000");
+		queryArguments.Add("order", "desc");
 
-		if (shouldCache)
+		modifiedQueryArguments = queryArguments.ToString();
+		
+		Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - prepped query");
+
+		Log.Information($"modifiedQueryArguments: {modifiedQueryArguments}");
+		
+	
+		/*
+		if (cacheFileExists)
 		{
 			try
 			{
-				if (File.Exists(requestCachePath))
+				using (var fileStream = File.OpenRead(fullCacheFileName))
 				{
-					using (var fileStream = File.OpenRead(requestCachePath))
-					{
-						return JsonSerializer.Deserialize<TResponse>(fileStream);
-					}
+					return JsonSerializer.Deserialize<TResponse>(fileStream);
 				}
 			}
 			catch (Exception err)
 			{
-				Log.Error(err, $"Could not load request from disk, {requestCacheFile}");
-				Console.WriteLine($"Error: Could not load request from disk, {requestCacheFile}");
+				Log.Error(err, $"Could not load request from disk, {fullCacheFileName}");
+				Console.WriteLine($"Error: Could not load request from disk, {fullCacheFileName}");
 				Console.WriteLine(err.Message);
 			}
 		}
-		//Console.WriteLine(url);
+		*/
+		
+		var modifiedEndpointWithQuery = (string.IsNullOrWhiteSpace(modifiedQueryArguments) ? modifiedEndpoint : $"{modifiedEndpoint}?{modifiedQueryArguments}");
+		Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before request");
 
-		using (var request = new HttpRequestMessage(HttpMethod.Get, uri))
+		using (var request = new HttpRequestMessage(HttpMethod.Get, modifiedEndpointWithQuery))
 		{
 			if (useAuth)
 			{
 				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? string.Empty);
 			}
+			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before loading cache row");
 
-			var response = await _httpClient.SendAsync(request);
+			//var cacheItem = CacheSQLiteConnection.Table<CacheItem>().SingleOrDefault(x => x.Endpoint.Equals(modifiedEndpointWithQuery, StringComparison.OrdinalIgnoreCase));
+			//var cacheItem = CacheSQLiteConnection.Table<CacheItem>().Where(x => x.Endpoint.Equals(modifiedEndpointWithQuery, StringComparison.OrdinalIgnoreCase)).Take(1);
+			var cacheItem = CacheSQLiteConnection.Query<CacheItem>("SELECT * FROM cache_item WHERE endpoint = ? LIMIT 1", modifiedEndpointWithQuery).FirstOrDefault();
 
-			// TODO: Check http status. May need to handle auth responses here for refreshing access token.
+			
+			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - after loading cache row");
 
-			using (var responseStream = await response.Content.ReadAsStreamAsync())
+			// Only bother with ETag if cache file exists.
+			if (cacheFileExists && string.IsNullOrEmpty(cacheItem?.ETag) == false)
 			{
-				if (shouldCache)
+				request.Headers.Add("If-None-Match", cacheItem.ETag);
+			}
+			
+			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before send async");
+
+			var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - after send async");
+
+			// TODO: GET ETAG HERE
+			
+			if (response.StatusCode == HttpStatusCode.NotModified)
+			{
+				try
 				{
-					try
+					Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - load from cache");
+
+					using (var fileStream = File.OpenRead(fullCacheFileName))
 					{
-						var directory = Path.GetDirectoryName(requestCachePath);
-						if (string.IsNullOrEmpty(directory) == false && Directory.Exists(directory) == false)
+						var cachedResponseObject = JsonSerializer.Deserialize<TResponse>(fileStream);
+						
+						// cacheItem should never be null here as we won't be setting ETag if it is null
+						if (cacheItem is not null)
 						{
-							Directory.CreateDirectory(directory);
+							cacheItem.LastChecked = DateTime.Now;
+							CacheSQLiteConnection.Update(cacheItem);
 						}
-						using (var fileStream = File.Create(requestCachePath))
-						{
-							await responseStream.CopyToAsync(fileStream);
-						}
-					}
-					catch (Exception err)
-					{
-						Log.Error(err, $"Could not save request to disk, {requestCacheFile}");
-						Console.WriteLine($"Error: Could not save request to disk, {requestCacheFile}");
-						Console.WriteLine(err.Message);
+						Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - loaded from cache");
+
+						return cachedResponseObject;
 					}
 				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not load request from disk, {fullCacheFileName}");
+					Console.WriteLine($"Error: Could not load request from disk, {fullCacheFileName}");
+					Console.WriteLine(err.Message);
+					Debugger.Break();
+				}
+				
+				// Should never get here.
+				Debugger.Break();
+			}
+			else if (response.StatusCode == HttpStatusCode.NotFound)
+			{
+				Log.Information($"{guid} GetAPIRequest: response code 404 - {endpoint}");
+				return default(TResponse);
+			}
+			else if (response.StatusCode != HttpStatusCode.OK)
+			{
+				Debugger.Break();
+			}
+			
+			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - start download");
+
+			using (var memoryStream = new MemoryStream())
+			{
+				using (var responseStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+				{
+					await responseStream.CopyToAsync(memoryStream).ConfigureAwait(false);
+				}
+
+				memoryStream.Position = 0;
+
+				Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - start save");
+
+				try
+				{
+					lock (_diskIOLock)
+					{
+						Directory.CreateDirectory(fullCacheDirectory);
+						
+						/*
+						var cacheDirectoryExists = Directory.Exists(fullCacheDirectory);
+
+						if (cacheDirectoryExists == false)
+						{
+							Directory.CreateDirectory(fullCacheDirectory);
+						}
+						*/
+					}
+
+					using (var fileStream = File.Create(fullCacheFileName))
+					{
+						await memoryStream.CopyToAsync(fileStream);
+					}
+					
+					if (response.Headers.ETag != null)
+					{
+						cacheItem = new CacheItem()
+						{
+							Endpoint = modifiedEndpointWithQuery,
+							ETag = response.Headers.ETag.ToString(),
+							LastChecked = DateTime.Now,
+						};
+				
+						CacheSQLiteConnection.InsertOrReplace(cacheItem);
+					}
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not save request to disk, {fullCacheFileName}");
+					Console.WriteLine($"Error: Could not save request to disk, {fullCacheFileName}");
+					Console.WriteLine(err.Message);
+				}
 #if DEBUG
+				/*
 				// Helps debug a specific endpoint as plaintext.
-				if (url.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
+				if (endpoint.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
 				{
 					//Debugger.Break();
 				}
+				*/
 #endif
-
-				responseStream.Position = 0;
-				return await JsonSerializer.DeserializeAsync<TResponse>(responseStream);
+				
+				memoryStream.Position = 0;
+				try
+				{
+					return await JsonSerializer.DeserializeAsync<TResponse>(memoryStream);
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not deserialize json for {endpoint}.");
+					return default(TResponse);
+				}
+				finally
+				{
+					Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - done");
+				}
 			}
 		}
 	}
-
-	public async Task<MeResponse?> GetMe()
+	
+	internal async Task<(bool Success, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string endpoint) where TResponse : BaseResponse<T>
 	{
-		return await GetAPIRequest<MeResponse>("https://business-service.roosterteeth.com/api/v1/me");
+		// No http requests should be coming here
+		if (endpoint.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+		{
+			Debugger.Break();
+			return (true, new List<T>());
+		}
+
+		Log.Information($"GetPaginatedAPIRequest: {endpoint}");
+		
+		var retries = 0;
+		var maxRetries = 5;
+		
+		var items = new List<T>();
+		var currentPage = 1;
+		
+		TResponse? response = null;
+		do
+		{
+			try
+			{
+				response = await GetAPIRequest<TResponse>(endpoint, page: currentPage).ConfigureAwait(false);
+				if (response == null)
+				{
+					throw new Exception("Response object was null");
+				}
+				
+				items.AddRange(response.Data);
+				++currentPage;
+			}
+			catch (Exception err)
+			{
+				++retries;
+				Log.Error(err, $"API Error, retries: {retries}, currentPage: {currentPage}, url: {endpoint}");
+				
+				// Wait 5 seconds before trying again.
+				await Task.Delay(5000);
+			}
+			
+			// Sometimes TotalPages is incorrect, and sometimes TotalResults is incorrect so we have to check both and hope for the best -_-
+		} while (retries < maxRetries && currentPage <= response?.TotalPages && items.Count < response?.TotalResults);
+
+		if (retries > maxRetries)
+		{
+			Log.Error($"Could not get all pages for url {endpoint}");
+			return (false, new List<T>());
+		}
+		
+		return (true, items);
+	}
+
+	public async Task<MeResponse?> GetMe(bool hasJustRefreshed = false)
+	{
+		var url2 = "https://business-service.roosterteeth.com/api/v1/me";
+		using (var request = new HttpRequestMessage(HttpMethod.Get, url2))
+		{
+			request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? string.Empty);
+
+			var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+			if (response.StatusCode == HttpStatusCode.Unauthorized)
+			{
+				if (hasJustRefreshed)
+				{
+					Log.Error("Could not refresh user data.");
+					return null;
+				}
+				else
+				{
+					// Try to refresh the access token.
+					var didRefresh = await RefreshToken();
+					if (didRefresh == false)
+					{
+						Log.Error("Could not refresh user data.");
+						return null;
+					}
+
+					// Call this again, but lets not get stuck with recursan..
+					return await GetMe(true);
+				}
+			}
+			else if (response.StatusCode != HttpStatusCode.OK)
+			{
+				Log.Error("Could not fetch user data.");
+				return null;
+			}
+
+			using (var memoryStream = new MemoryStream())
+			{
+				using (var responseStream = await response.Content.ReadAsStreamAsync())
+				{
+					await responseStream.CopyToAsync(memoryStream);
+				}
+
+				memoryStream.Position = 0;
+				try
+				{
+					return await JsonSerializer.DeserializeAsync<MeResponse>(memoryStream);
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not deserialize json for {url2}.");
+					return default(MeResponse);
+				}
+			}
+		}
 	}
 
 	public async Task<List<Genre>> GetGenres()
 	{
 		Genres.Clear();
-		
+
+		// Load from cache file.
+		/*
 		var genresCacheFile = Path.Combine(Storage.CachePath, "genres.json");
 		if (File.Exists(genresCacheFile))
 		{
@@ -282,11 +524,13 @@ public class RTClient
 				}
 			}
 		}
-		
-		var genresResponse = await GetAPIRequest<GenresResponse>("https://svod-be.roosterteeth.com/api/v1/genres");
-		if (genresResponse is not null)
+		*/
+
+	
+		var response = await GetPaginatedAPIRequest<Genre, GenresResponse>("/api/v1/genres");
+		if (response.Success)
 		{
-			foreach (var genre in genresResponse.Data)
+			foreach (var genre in response.Items)
 			{
 				if (Genres.ContainsKey(genre.Slug))
 				{
@@ -297,11 +541,20 @@ public class RTClient
 				Genres[genre.Slug] = genre;
 			}
 		}
+		else
+		{
+			Console.WriteLine("Error: Could not load genres.");
+			Log.Error("Could not load genres.");
+			return new List<Genre>();
+		}
 		
+		// Save to cache file.
+		/*
 		using (var fileStream = File.Create(genresCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Genres, new JsonSerializerOptions() { WriteIndented = true });
 		}
+		*/
 
 		return Genres.Values.ToList();
 	}
@@ -310,6 +563,7 @@ public class RTClient
 	{
 		Channels.Clear();
 		
+		// Load from cache file.
 		var channelsCacheFile = Path.Combine(Storage.CachePath, "channels.json");
 		if (File.Exists(channelsCacheFile))
 		{
@@ -322,53 +576,45 @@ public class RTClient
 					{
 						Channels[tempChannel.Key] = tempChannel.Value;
 					}
-
 					return Channels.Values.ToList();
 				}
 			}
 		}
 		
-		var channels  = new List<Channel>();
-
-		var page = 1;
-		ChannelsResponse? channelsResponse;
-		do
+		var response = await GetPaginatedAPIRequest<Channel, ChannelsResponse>("/api/v1/channels");
+		if (response.Success)
 		{
-			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			channelsResponse = await GetAPIRequest<ChannelsResponse>("https://svod-be.roosterteeth.com/api/v1/channels", page, useAuth: false);
-
-			//Console.WriteLine($"Loaded page {page}, page: {channelsResponse.Page}, perPage: {channelsResponse.PerPage}, totalPages: {channelsResponse.TotalPages}, totalResults: {channelsResponse.TotalResults}");
-			if (channelsResponse != null)
+			foreach (var channel in response.Items)
 			{
-				channels.AddRange(channelsResponse.Data);
-				++page;
+				if (Channels.ContainsKey(channel.Slug))
+				{
+					Log.Error($"Duplicate channel key found, {channel.Slug}");
+					Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
+				}
+				Channels[channel.Slug] = channel;
 			}
-
-			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page - 1 < channelsResponse?.TotalPages);
-
-		foreach (var channel in channels)
+		}
+		else
 		{
-			if (Channels.ContainsKey(channel.Slug))
-			{
-				Log.Error($"Duplicate channel key found, {channel.Slug}");
-				Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
-			}
-			Channels[channel.Slug] = channel;
+			Console.WriteLine("Error: Could not load channels.");
+			Log.Error("Could not load channels.");
+			return new List<Channel>();
 		}
 		
+		// Save file to cache.
 		using (var fileStream = File.Create(channelsCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Channels, new JsonSerializerOptions() { WriteIndented = true });
 		}
 
-		return channels;
+		return Channels.Values.ToList();
 	}
 
 	public async Task<List<Show>> GetShows()
 	{
 		Shows.Clear();
 		
+		// Load from cache file
 		var showsCacheFile = Path.Combine(Storage.CachePath, "shows.json");
 		if (File.Exists(showsCacheFile))
 		{
@@ -387,72 +633,95 @@ public class RTClient
 			}
 		}
 		
-		var shows = new List<Show>();
-
-		var page = 1;
-		ShowsResponse? showsResponse;
-		do
+		
+		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>("/api/v1/channels");
+		if (response.Success)
 		{
-			// TODO: Add attempts and if a request fails and returns null try attempt again.
-			showsResponse = await GetAPIRequest<ShowsResponse>("https://svod-be.roosterteeth.com/api/v1/shows", page);
-
-			//Console.WriteLine($"Loaded page {page}, page: {showsResponse.Page}, perPage: {showsResponse.PerPage}, totalPages: {showsResponse.TotalPages}, totalResults: {showsResponse.TotalResults}");
-			if (showsResponse != null)
+			foreach (var show in response.Items)
 			{
-				shows.AddRange(showsResponse.Data);
-				++page;
+				if (Shows.ContainsKey(show.Slug))
+				{
+					Log.Error($"Duplicate show key found, {show.Slug}");
+					Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
+				}
+				Shows[show.Slug] = show;
 			}
-
-			// TotalPages appears to change over time, but this should still work ok. 
-		} while (page - 1 < showsResponse?.TotalPages);
-
-		foreach (var show in shows)
+		}
+		else
 		{
-			if (Shows.ContainsKey(show.Slug))
-			{
-				Log.Error($"Duplicate show key found, {show.Slug}");
-				Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
-			}
-
-			Shows[show.Slug] = show;
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Show>();
 		}
 		
+		// Save to cache file
 		using (var fileStream = File.Create(showsCacheFile))
 		{
 			await JsonSerializer.SerializeAsync(fileStream, Shows, new JsonSerializerOptions() { WriteIndented = true });
 		}
 		
-		return shows;
+		return Shows.Values.ToList();
 	}
 	
 	
 	public async Task<List<Show>> GetShows(Channel channel)
 	{
-		var shows = new List<Show>();
-		var showsResponse = await GetAPIRequest<ShowsResponse>(channel.Links.Shows);
-		if (showsResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>(channel.Links.Shows);
+		if (response.Success)
 		{
-			shows.AddRange(showsResponse.Data);
+			return response.Items;
 		}
-		return shows;
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Show>();
+		}
 	}
 
 	public async Task<List<Season>> GetSeasons(string showSlug)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
-		return seasonsResponse?.Data ?? new List<Season>();
+		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Season>();
+		}
 	}
 	
 	public async Task<List<Season>> GetSeasons(Show show)
 	{
-		var seasonsResponse = await GetAPIRequest<SeasonsResponse>(show.Links.Seasons);
-		return seasonsResponse?.Data ?? new List<Season>();
+		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>(show.Links.Seasons);
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<Season>();
+		}
 	}
 	
 	public async Task<List<BonusFeature>> GetBonusFeatures(string showSlug)
 	{
-		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
-		return bonusFeaturesResponse?.Data ?? new List<BonusFeature>();
+		var response = await GetPaginatedAPIRequest<BonusFeature, BonusFeaturesResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/bonus_features");
+		if (response.Success)
+		{
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load shows.");
+			Log.Error("Could not load shows.");
+			return new List<BonusFeature>();
+		}
 	}
 		
 	public async Task<List<DownloadItem>> GetDownloadItemsForEverything(Channel channel, Show show)
@@ -465,77 +734,80 @@ public class RTClient
 
 	public async Task<List<Episode>> GetEpisodes(Season season)
 	{
-		// TODO: pagination?
-		var episodes = new List<Episode>();
-		var episodeResponse = await GetAPIRequest<EpidsodesResponse>(season.Links.Episodes);
-		if (episodeResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Episode, EpisodesResponse>(season.Links.Episodes);
+		if (response.Success)
 		{
-			episodes.AddRange(episodeResponse.Data);
+			return response.Items;
 		}
-
-		return episodes;
+		else
+		{
+			Console.WriteLine("Error: Could not load episodes.");
+			Log.Error("Could not load episodes.");
+			return new List<Episode>();
+		}
 	}
 	
 	public async Task<List<Episode>> GetEpisodes(Channel channel)
 	{
-		// TODO: pagination?
-		var episodes = new List<Episode>();
-
-		var page = 1;
-		EpidsodesResponse episodeResponse;
-		do
+		var response = await GetPaginatedAPIRequest<Episode, EpisodesResponse>(channel.Links.Episodes);
+		if (response.Success)
 		{
-			episodeResponse = await GetAPIRequest<EpidsodesResponse>(channel.Links.Episodes, page: page);
-			if (episodeResponse?.Data != null)
-			{
-				episodes.AddRange(episodeResponse.Data);
-			}
-
-			++page;
-		} while (page - 1 < episodeResponse?.TotalPages);
-		
-		return episodes;
+			return response.Items;
+		}
+		else
+		{
+			Console.WriteLine("Error: Could not load episodes.");
+			Log.Error("Could not load episodes.");
+			return new List<Episode>();
+		}
 	}
 	
 	
 	
 	public async Task<List<BonusFeature>> GetBonusFeatures(Show show)
 	{
-		// TODO: pagination?
-		var bonusFeatures = new List<BonusFeature>();
-		var bonusFeaturesResponse = await GetAPIRequest<BonusFeaturesResponse>(show.Links.BonusFeatures);
-		if (bonusFeaturesResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<BonusFeature, BonusFeaturesResponse>(show.Links.BonusFeatures);
+		if (response.Success)
 		{
-			bonusFeatures.AddRange(bonusFeaturesResponse.Data);
+			return response.Items;
 		}
-
-		return bonusFeatures;
+		else
+		{
+			Console.WriteLine("Error: Could not load bonus features.");
+			Log.Error("Could not load bonus features.");
+			return new List<BonusFeature>();
+		}
 	}
 	
 	public async Task<List<Video>> GetVideos(Episode episode)
 	{
-		// TODO: pagination?
-		var videos = new List<Video>();
-		var videosResponse = await GetAPIRequest<VideosResponse>(episode.Links.Videos);
-		if (videosResponse?.Data != null)
+		var response = await GetPaginatedAPIRequest<Video, VideosResponse>(episode.Links.Videos);
+		if (response.Success)
 		{
-			videos.AddRange(videosResponse.Data);
+			return response.Items;
 		}
-
-		return videos;
+		else
+		{
+			Console.WriteLine("Error: Could not load videos.");
+			Log.Error("Could not load videos.");
+			return new List<Video>();
+		}
 	}
 	
 	public async Task<List<Video>> GetVideos(BonusFeature bonusFeature)
 	{
-		// TODO: pagination?
-		var videos = new List<Video>();
-		var videosResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
-		if (videosResponse?.Data != null)
+		
+		var response = await GetPaginatedAPIRequest<Video, VideosResponse>(bonusFeature.Links.Videos);
+		if (response.Success)
 		{
-			videos.AddRange(videosResponse.Data);
+			return response.Items;
 		}
-
-		return videos;
+		else
+		{
+			Console.WriteLine("Error: Could not load videos.");
+			Log.Error("Could not load videos.");
+			return new List<Video>();
+		}
 	}
 	
 	
@@ -638,62 +910,415 @@ public class RTClient
 
 	public async Task CacheGoBrrrr()
 	{
-		/*
-		var response = await GetAllAPIRequest<BaseResponse<object>>("https://svod-be.roosterteeth.com/api/v1/shows/camp-camp");
-		Debugger.Break();
-		*/
-		
-		foreach (var channel in Channels.Values)
-		{
-			
-			
-			// Disabled as this is a lot of videos
-			var allEpisodes = await GetEpisodes(channel);
-			foreach (var episode in allEpisodes)
-			{
-				Console.WriteLine($" -> {episode.FileName()}");
-			}
-			
+		var rtClientApiCrawler = new RTClientAPICrawler(this);
+		await rtClientApiCrawler.StartAsync();
+	}
 
-			Console.WriteLine($"Channel: {channel.Name}");
-			Console.WriteLine("Shows:");
-			var shows = await GetShows(channel);
-			foreach (var show in shows)
+	public async Task DownloadSitemapsAsync()
+	{
+		var sitemapSqliteConnection = new SQLiteConnection(Path.Combine(Storage.SitemapPath, "sitemap.db"));
+		
+		// TODO: Backup DB?
+		//_sitemapSqliteConnection.Backup();
+		
+		try
+		{
+			sitemapSqliteConnection.CreateTable<Sitemap>();
+			sitemapSqliteConnection.CreateTable<StaticPage>();
+			sitemapSqliteConnection.CreateTable<VideoUrl>();
+			sitemapSqliteConnection.CreateTable<SiteMapVideo>();
+		}
+		catch (Exception err)
+		{
+			Log.Error(err, $"Could not create sitemap SQLite database.");
+			Debugger.Break();
+			return;
+		}
+
+		
+		var rootSitemap = await DownloadSitemapAsync("https://svod-be.roosterteeth.com/sitemap.xml");
+
+		SitemapIndex? sitemapIndex = null;
+		
+		using (StreamReader reader = new StreamReader(rootSitemap))
+		{
+			var serializer = new XmlSerializer(typeof(SitemapIndex));
+			sitemapIndex = (SitemapIndex)serializer.Deserialize(reader);
+		}
+
+		if (sitemapIndex is null)
+		{
+			Log.Error("Could not load root sitemap.");
+			Debugger.Break();
+			return;
+		}
+
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = NumberOfThreads,
+		};
+		
+		Parallel.ForEach(sitemapIndex.Sitemaps, parallelOptions, (sitemap, token) =>
+		{
+			sitemap.Id = Sitemap.GetIdFromLocation(sitemap.Location);
+			sitemap.Tag = Sitemap.GetTagFromLocation(sitemap.Location);
+			sitemapSqliteConnection.InsertOrReplace(sitemap);
+		});
+
+		var transactionLock = new object();
+
+		await Parallel.ForEachAsync(sitemapIndex.Sitemaps, parallelOptions, async (sitemap, token) =>
+		{
+			var sitemapPath = await DownloadSitemapAsync(sitemap.Location);
+
+			if (string.IsNullOrEmpty(sitemapPath))
 			{
-				Console.WriteLine($" -> {show.Attributes.Title}");
-				
-				Console.WriteLine(" Seasons:");
-				var seasons = await GetSeasons(show);
-				foreach (var season in seasons)
+				// This error should already have been handled.
+				return;
+			}
+
+			var stopwatch = new Stopwatch();
+			stopwatch.Start();
+
+			Log.Information($"{sitemap.Tag} - starting");
+
+			if (sitemap.Tag == "static-pages")
+			{
+				StaticPageSet? staticPageSet = null;
+				using (StreamReader reader = new StreamReader(sitemapPath))
 				{
-					Console.WriteLine($"  -> {season.Attributes.Number} - {season.Attributes.Title}");
-					
-					Console.WriteLine("  Episodes:");
-					var episodes = await GetEpisodes(season);
-					foreach (var episode in episodes)
+					var serializer = new XmlSerializer(typeof(StaticPageSet));
+					staticPageSet = (StaticPageSet)serializer.Deserialize(reader);
+				}
+
+				if (staticPageSet is null)
+				{
+					Log.Error($"Could not load sitemap - {sitemapPath}");
+					Debugger.Break();
+					return;
+				}
+
+				Log.Information($"{sitemap.Tag} - Found {staticPageSet.Urls.Count} items");
+
+				var dbStaticPages = sitemapSqliteConnection.Table<StaticPage>().ToList();
+				lock (transactionLock)
+				{
+					sitemapSqliteConnection.BeginTransaction();
+					foreach (var staticPage in staticPageSet.Urls)
 					{
-						Console.WriteLine($"   -> {episode.FullLocalPath()}");
-						var videos = await GetVideos(episode);
-						Console.WriteLine($"    -> {videos.Count}");
+						var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
+
+						if (dbStaticPage is null)
+						{
+							staticPage.Guid = Guid.NewGuid().ToByteArray();
+						}
+						else
+						{
+							staticPage.Guid = dbStaticPage.Guid;
+						}
+
+						sitemapSqliteConnection.InsertOrReplace(staticPage);
+					}
+
+					sitemapSqliteConnection.Commit();
+				}
+			}
+			else if (sitemap.Tag == "rooster-teeth" ||
+			         sitemap.Tag == "achievement-hunter" ||
+			         sitemap.Tag == "funhaus" ||
+			         sitemap.Tag == "death-battle" ||
+			         sitemap.Tag == "kinda-funny" ||
+			         sitemap.Tag == "friends-of-rt" ||
+			         sitemap.Tag == "rwby-universe" ||
+			         sitemap.Tag == "red-vs-blue-universe" ||
+			         sitemap.Tag == "all-good-no-worries" ||
+			         sitemap.Tag == "best-friends-today" ||
+			         sitemap.Tag == "inside-gaming" ||
+			         sitemap.Tag == "tales-from-the-stinky-dragon" ||
+			         sitemap.Tag == "dogbark" ||
+			         sitemap.Tag == "f-kface" ||
+			         sitemap.Tag == "camp-camp" ||
+			         sitemap.Tag == "red-web")
+			{
+				VideoSet? videoSet = null;
+				using (StreamReader reader = new StreamReader(sitemapPath))
+				{
+					var serializer = new XmlSerializer(typeof(VideoSet));
+					videoSet = (VideoSet)serializer.Deserialize(reader);
+				}
+
+				//var video = videoSet.Urls.First();
+
+				if (videoSet is null)
+				{
+					Log.Error($"Could not load sitemap - {sitemapPath}");
+					Debugger.Break();
+					return;
+				}
+
+				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls.Count} items");
+
+				var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
+
+				lock (transactionLock)
+				{
+					sitemapSqliteConnection.BeginTransaction();
+					foreach (var videoUrl in videoSet.Urls)
+					{
+						videoUrl.SitemapId = sitemap.Id;
+						videoUrl.SitemapTag = sitemap.Tag;
+						var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
+						if (dbVideoUrl is null)
+						{
+							videoUrl.Guid = Guid.NewGuid().ToByteArray();
+						}
+						else
+						{
+							videoUrl.Guid = dbVideoUrl.Guid;
+						}
+
+						sitemapSqliteConnection.InsertOrReplace(videoUrl);
+
+						videoUrl.Video.Guid = videoUrl.Guid;
+						sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+					}
+
+					sitemapSqliteConnection.Commit();
+				}
+			}
+			else
+			{
+				Log.Error($"Unknown sitemap tag found - {sitemap.Tag}");
+				Debugger.Break();
+			}
+
+			stopwatch.Stop();
+			Log.Information($"{sitemap.Tag} - Finished, took {stopwatch.ElapsedMilliseconds}ms");
+		});
+	}
+	
+	async Task<string> DownloadSitemapAsync(string url)
+	{
+		Log.Information($"Downloading sitemap - {url}");
+		var sitemapFile = url.Replace("https://svod-be.roosterteeth.com/", string.Empty, StringComparison.OrdinalIgnoreCase).Replace("/", "_", StringComparison.OrdinalIgnoreCase);
+		var cacheFile = Path.Combine(Storage.SitemapPath, sitemapFile);
+
+		try
+		{
+			// TODO: Handle cache.
+			/*
+			if (File.Exists(cacheFile))
+			{
+				return cacheFile;
+			}
+			*/
+		
+			var response = await _httpClient.GetAsync(url);
+			response.EnsureSuccessStatusCode();
+			
+			using (var fileStream = File.Create(cacheFile))
+			{
+				using (var stream = await response.Content.ReadAsStreamAsync())
+				{
+					await stream.CopyToAsync(fileStream);
+				}
+			}
+
+			return cacheFile;
+		}
+		catch (Exception err)
+		{
+			Log.Error(err, $"Could not download sitemap - {url}");
+			Debugger.Break();
+			return string.Empty;
+		}
+	}
+
+	public async Task DownloadAllAsync()
+	{
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_*.json", SearchOption.AllDirectories);
+
+		/*
+		List<string> episodes = new List<string>();
+		List<string> bonusFeatures = new List<string>();
+		*/
+		List<string> videos = new List<string>();
+		
+		
+		var ids = new Dictionary<long, int>(jsonFiles.Length);
+		var contentName = new Dictionary<string, int>(jsonFiles.Length);
+
+		//Debugger.Break();
+
+
+		var dictionaryLock = new object();
+		
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = 4,
+		};
+		
+
+		var tempPath = Path.Combine(Storage.TempPath, "rt-archiver");
+		if (Directory.Exists(tempPath))
+		{
+			var tempPathGuid = Path.Combine(Storage.TempPath, $"temp_{Guid.NewGuid().ToString("D")}");
+
+			Directory.Move(tempPath, tempPathGuid);
+			Directory.Delete(tempPathGuid, true);
+		}
+		Directory.CreateDirectory(tempPath);
+		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
+		{
+			Log.Information($"Reading: {jsonFile}");
+			//var fileData = File.ReadAllText(jsonFile);
+			using (var fileStream = File.OpenRead(jsonFile))
+			{
+				var videosResponse = await JsonSerializer.DeserializeAsync<RTArchiver.Data.Responses.VideosResponse>(fileStream);
+
+				if (videosResponse is null)
+				{
+					Log.Error($"Error: videosResponse was null");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Data.Count == 0)
+				{
+					Log.Error($"Error: Zero videos found - {jsonFile}");
+					return;
+				}
+		
+
+				if (videosResponse.Data.Count > 1)
+				{
+					Log.Error($"Error: More than 1 videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Data[0].Type == "video")
+				{
+					videos.Add(jsonFile);
+				}
+				else
+				{
+					Debugger.Break();
+					return;
+				}
+				
+				var id = videosResponse.Data[0].Id;
+				
+				try
+				{
+					
+					
+					var downloadUrl = videosResponse.Data[0].Links?.Download ?? string.Empty;
+					if (string.IsNullOrEmpty(downloadUrl))
+					{
+						Debugger.Break();
+					}
+					
+					var outputFile = $"{id}.mkv";
+					var tempOutputPath = Path.Combine(tempPath, outputFile);
+					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
+
+					if (Path.Exists(outputPath))
+					{
+						Log.Information($"Skipping {outputPath}");
+						return;
+					}
+					Log.Information($"Downloading {outputFile}");
+					//Console.WriteLine($"yt-dlp --merge-output-format mkv  --paths \"temp:{tempPath}\" --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 2 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+
+					var processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv  --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+					if (processResults.ExitCode == 0)
+					{
+						File.Move(tempOutputPath, outputPath);
+					}
+					else
+					{
+						throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n");
 					}
 				}
-				
-				Console.WriteLine(" Bonus features:");
-				var bonusFeatures = await GetBonusFeatures(show);
-				foreach (var bonusFeature in bonusFeatures)
+				catch (Exception err)
 				{
-					Console.WriteLine($"  -> {bonusFeature.Attributes.Title}");
-					
-					
-					Console.WriteLine($"   -> {bonusFeature.FullLocalPath(show)}");
-					var videos = await GetVideos(bonusFeature);
-					Console.WriteLine($"    -> {videos.Count}");
-					
-					//bonusFeature.Links.Videos
+					Log.Error(err, $"Could not download video ID {id}, {jsonFile}");
+				}
+
+				return;
+				
+				/*
+				 episode
+				else if (videosResponse.Data[0].Type == "bonus_feature")
+				{
+					bonusFeatures.Add(jsonFile);
+				}
+				else if (videosResponse.Data[0].Type == "video")
+				{
+					videos.Add(jsonFile);
+				}
+				else
+				{
+					Debugger.Break();
+				}
+				*/
+
+				var content = videosResponse.Data[0].Links?.Content ?? string.Empty;
+				if (string.IsNullOrEmpty(content))
+				{
+					Debugger.Break();
+				}
+				
+				try
+				{
+					lock (dictionaryLock)
+					{
+						if (ids.TryAdd(id, 1) == false)
+						{
+							++ids[id];
+						}
+
+						if (contentName.TryAdd(content, 1) == false)
+						{
+							++contentName[content];
+						}
+					}
+				}
+				catch (Exception err)
+				{
+					Console.WriteLine(err);
+					Debugger.Break();
+				}
+		
+			}
+		});
+		
+		
+		/*
+		var frozenDictionary = contentName.ToFrozenDictionary();
+		var idKeys = frozenDictionary.Keys.ToList();
+		idKeys.Sort();
+
+		// --paths "temp:path"
+		using (var fileStream = File.Create("video_path.txt"))
+		{
+			using (var streamWriter = new StreamWriter(fileStream))
+			{
+				foreach (var id in idKeys)
+				{
+					try
+					{
+						streamWriter.WriteLine($"{id} - {frozenDictionary[id]}");
+					}
+					catch (Exception err)
+					{
+						Console.WriteLine($"{id} not found in frozenDictionary");
+						Debugger.Break();
+					}
+
 				}
 			}
-			
-		}
-		
+		}*/
 	}
 }
