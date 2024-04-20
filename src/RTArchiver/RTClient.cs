@@ -26,10 +26,6 @@ public class RTClient
 	readonly HttpClient _httpClient = new HttpClient();
 	AuthResponse? _authResponse;
 
-	public Dictionary<string, Genre> Genres { get; } = new Dictionary<string, Genre>();
-	public Dictionary<string, Show> Shows { get; } = new Dictionary<string, Show>();
-	public Dictionary<string, Channel> Channels { get; } = new Dictionary<string, Channel>();
-
 	public SQLiteConnection CacheSQLiteConnection { get; init; }
 
 	public int NumberOfThreads { get; set; } = Environment.ProcessorCount;
@@ -151,7 +147,7 @@ public class RTClient
 		var guid = Guid.NewGuid().ToString("D");
 		var stopwatch = new Stopwatch();
 		stopwatch.Start();
-		Log.Information($"{guid} GetAPIRequest: {endpoint}, page {page}, useAuth: {useAuth}");
+		Log.Verbose($"{guid} GetAPIRequest: {endpoint}, page {page}, useAuth: {useAuth}");
 		
 		if (endpoint.StartsWith("http"))
 		{
@@ -215,9 +211,9 @@ public class RTClient
 
 		modifiedQueryArguments = queryArguments.ToString();
 		
-		Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - prepped query");
+		Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - prepped query");
 
-		Log.Information($"modifiedQueryArguments: {modifiedQueryArguments}");
+		Log.Verbose($"modifiedQueryArguments: {modifiedQueryArguments}");
 		
 	
 		/*
@@ -240,7 +236,7 @@ public class RTClient
 		*/
 		
 		var modifiedEndpointWithQuery = (string.IsNullOrWhiteSpace(modifiedQueryArguments) ? modifiedEndpoint : $"{modifiedEndpoint}?{modifiedQueryArguments}");
-		Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before request");
+		Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before request");
 
 		using (var request = new HttpRequestMessage(HttpMethod.Get, modifiedEndpointWithQuery))
 		{
@@ -248,14 +244,14 @@ public class RTClient
 			{
 				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authResponse?.AccessToken ?? string.Empty);
 			}
-			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before loading cache row");
+			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before loading cache row");
 
 			//var cacheItem = CacheSQLiteConnection.Table<CacheItem>().SingleOrDefault(x => x.Endpoint.Equals(modifiedEndpointWithQuery, StringComparison.OrdinalIgnoreCase));
 			//var cacheItem = CacheSQLiteConnection.Table<CacheItem>().Where(x => x.Endpoint.Equals(modifiedEndpointWithQuery, StringComparison.OrdinalIgnoreCase)).Take(1);
 			var cacheItem = CacheSQLiteConnection.Query<CacheItem>("SELECT * FROM cache_item WHERE endpoint = ? LIMIT 1", modifiedEndpointWithQuery).FirstOrDefault();
 
 			
-			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - after loading cache row");
+			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - after loading cache row");
 
 			// Only bother with ETag if cache file exists.
 			if (cacheFileExists && string.IsNullOrEmpty(cacheItem?.ETag) == false)
@@ -263,10 +259,10 @@ public class RTClient
 				request.Headers.Add("If-None-Match", cacheItem.ETag);
 			}
 			
-			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - before send async");
+			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before send async");
 
 			var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - after send async");
+			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - after send async");
 
 			// TODO: GET ETAG HERE
 			
@@ -274,7 +270,7 @@ public class RTClient
 			{
 				try
 				{
-					Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - load from cache");
+					Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - load from cache");
 
 					using (var fileStream = File.OpenRead(fullCacheFileName))
 					{
@@ -286,7 +282,7 @@ public class RTClient
 							cacheItem.LastChecked = DateTime.Now;
 							CacheSQLiteConnection.Update(cacheItem);
 						}
-						Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - loaded from cache");
+						Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - loaded from cache");
 
 						return cachedResponseObject;
 					}
@@ -294,8 +290,6 @@ public class RTClient
 				catch (Exception err)
 				{
 					Log.Error(err, $"Could not load request from disk, {fullCacheFileName}");
-					Console.WriteLine($"Error: Could not load request from disk, {fullCacheFileName}");
-					Console.WriteLine(err.Message);
 					Debugger.Break();
 				}
 				
@@ -304,7 +298,7 @@ public class RTClient
 			}
 			else if (response.StatusCode == HttpStatusCode.NotFound)
 			{
-				Log.Information($"{guid} GetAPIRequest: response code 404 - {endpoint}");
+				Log.Error($"{guid} GetAPIRequest: response code 404 - {endpoint}");
 				return default(TResponse);
 			}
 			else if (response.StatusCode != HttpStatusCode.OK)
@@ -312,7 +306,7 @@ public class RTClient
 				Debugger.Break();
 			}
 			
-			Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - start download");
+			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - start download");
 
 			using (var memoryStream = new MemoryStream())
 			{
@@ -323,7 +317,7 @@ public class RTClient
 
 				memoryStream.Position = 0;
 
-				Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - start save");
+				Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - start save");
 
 				try
 				{
@@ -361,8 +355,6 @@ public class RTClient
 				catch (Exception err)
 				{
 					Log.Error(err, $"Could not save request to disk, {fullCacheFileName}");
-					Console.WriteLine($"Error: Could not save request to disk, {fullCacheFileName}");
-					Console.WriteLine(err.Message);
 				}
 #if DEBUG
 				/*
@@ -386,7 +378,7 @@ public class RTClient
 				}
 				finally
 				{
-					Log.Information($"{guid} - {stopwatch.ElapsedMilliseconds} - done");
+					Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - done");
 				}
 			}
 		}
@@ -503,172 +495,134 @@ public class RTClient
 
 	public async Task<List<Genre>> GetGenres()
 	{
-		Genres.Clear();
-
-		// Load from cache file.
-		/*
-		var genresCacheFile = Path.Combine(Storage.CachePath, "genres.json");
-		if (File.Exists(genresCacheFile))
+		var cacheDataPath = Path.Combine(Storage.CachePath, "data");
+		if (Directory.Exists(cacheDataPath) == false)
 		{
-			using (var fileStream = File.OpenRead(genresCacheFile))
+			Directory.CreateDirectory(cacheDataPath);
+		}
+		
+		var cacheFile = Path.Combine(cacheDataPath, "genres.json");
+		
+		// Load from cache file.
+		if (UseCache)
+		{
+			if (File.Exists(cacheFile))
 			{
-				var tempGenres = JsonSerializer.Deserialize<Dictionary<string, Genre>>(fileStream);
-				if (tempGenres != null)
+				using (var fileStream = File.OpenRead(cacheFile))
 				{
-					foreach (var tempGenre in tempGenres)
+					var tempChannels = JsonSerializer.Deserialize<List<Genre>>(fileStream);
+					if (tempChannels != null)
 					{
-						Genres[tempGenre.Key] = tempGenre.Value;
+						return tempChannels;
 					}
-
-					return Genres.Values.ToList();
 				}
 			}
+			
+			Log.Information("Could not load from cache, requesting from server.");
 		}
-		*/
 
-	
 		var response = await GetPaginatedAPIRequest<Genre, GenresResponse>("/api/v1/genres");
 		if (response.Success)
 		{
-			foreach (var genre in response.Items)
+			// Save file to cache.
+			using (var fileStream = File.Create(cacheFile))
 			{
-				if (Genres.ContainsKey(genre.Slug))
-				{
-					Log.Error($"Duplicate genre key found, {genre.Slug}");
-					Console.WriteLine($"Error: Duplicate genre key found, {genre.Slug}");
-				}
-
-				Genres[genre.Slug] = genre;
+				await JsonSerializer.SerializeAsync(fileStream, response.Items, new JsonSerializerOptions() { WriteIndented = true });
 			}
+
+			return response.Items;
 		}
 		else
 		{
-			Console.WriteLine("Error: Could not load genres.");
-			Log.Error("Could not load genres.");
+			Log.Error("Could not load channels.");
 			return new List<Genre>();
 		}
-		
-		// Save to cache file.
-		/*
-		using (var fileStream = File.Create(genresCacheFile))
-		{
-			await JsonSerializer.SerializeAsync(fileStream, Genres, new JsonSerializerOptions() { WriteIndented = true });
-		}
-		*/
-
-		return Genres.Values.ToList();
 	}
 	
 	public async Task<List<Channel>> GetChannels()
 	{
-		Channels.Clear();
-		
-		// Load from cache file.
-		var channelsCacheFile = Path.Combine(Storage.CachePath, "channels.json");
-		if (File.Exists(channelsCacheFile))
+		var cacheDataPath = Path.Combine(Storage.CachePath, "data");
+		if (Directory.Exists(cacheDataPath) == false)
 		{
-			using (var fileStream = File.OpenRead(channelsCacheFile))
-			{
-				var tempChannels = JsonSerializer.Deserialize<Dictionary<string, Channel>>(fileStream);
-				if (tempChannels != null)
-				{
-					foreach (var tempChannel in tempChannels)
-					{
-						Channels[tempChannel.Key] = tempChannel.Value;
-					}
-					return Channels.Values.ToList();
-				}
-			}
+			Directory.CreateDirectory(cacheDataPath);
 		}
 		
+		var cacheFile = Path.Combine(cacheDataPath, "channels.json");
+		
+		// Load from cache file.
+		if (UseCache)
+		{
+			if (File.Exists(cacheFile))
+			{
+				using (var fileStream = File.OpenRead(cacheFile))
+				{
+					var tempChannels = JsonSerializer.Deserialize<List<Channel>>(fileStream);
+					if (tempChannels != null)
+					{
+						return tempChannels;
+					}
+				}
+			}
+			
+			Log.Information("Could not load from cache, requesting from server.");
+		}
+
 		var response = await GetPaginatedAPIRequest<Channel, ChannelsResponse>("/api/v1/channels");
 		if (response.Success)
 		{
-			foreach (var channel in response.Items)
+			// Save file to cache.
+			using (var fileStream = File.Create(cacheFile))
 			{
-				if (Channels.ContainsKey(channel.Slug))
-				{
-					Log.Error($"Duplicate channel key found, {channel.Slug}");
-					Console.WriteLine($"Error: Duplicate channel key found, {channel.Slug}");
-				}
-				Channels[channel.Slug] = channel;
+				await JsonSerializer.SerializeAsync(fileStream, response.Items, new JsonSerializerOptions() { WriteIndented = true });
 			}
+
+			return response.Items;
 		}
 		else
 		{
-			Console.WriteLine("Error: Could not load channels.");
 			Log.Error("Could not load channels.");
 			return new List<Channel>();
 		}
-		
-		// Save file to cache.
-		using (var fileStream = File.Create(channelsCacheFile))
-		{
-			await JsonSerializer.SerializeAsync(fileStream, Channels, new JsonSerializerOptions() { WriteIndented = true });
-		}
-
-		return Channels.Values.ToList();
 	}
 
 	public async Task<List<Show>> GetShows()
 	{
-		Shows.Clear();
+		var cacheDataPath = Path.Combine(Storage.CachePath, "data");
+		if (Directory.Exists(cacheDataPath) == false)
+		{
+			Directory.CreateDirectory(cacheDataPath);
+		}
+		
+		var cacheFile = Path.Combine(cacheDataPath, "shows.json");
 		
 		// Load from cache file
-		var showsCacheFile = Path.Combine(Storage.CachePath, "shows.json");
-		if (File.Exists(showsCacheFile))
+		if (UseCache)
 		{
-			using (var fileStream = File.OpenRead(showsCacheFile))
+			if (File.Exists(cacheFile))
 			{
-				var tempShows = JsonSerializer.Deserialize<Dictionary<string, Show>>(fileStream);
-				if (tempShows != null)
+				using (var fileStream = File.OpenRead(cacheFile))
 				{
-					foreach (var tempShow in tempShows)
+					var tempShows = JsonSerializer.Deserialize<List<Show>>(fileStream);
+					if (tempShows != null)
 					{
-						Shows[tempShow.Key] = tempShow.Value;
+						return tempShows;
 					}
+				}
+			}
+			
+			Log.Information("Could not load from cache, requesting from server.");
+		}
 
-					return Shows.Values.ToList();
-				}
-			}
-		}
-		
-		
-		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>("/api/v1/channels");
+
+		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>("/api/v1/shows");
 		if (response.Success)
 		{
-			foreach (var show in response.Items)
+			// Save to cache file
+			using (var fileStream = File.Create(cacheFile))
 			{
-				if (Shows.ContainsKey(show.Slug))
-				{
-					Log.Error($"Duplicate show key found, {show.Slug}");
-					Console.WriteLine($"Error: Duplicate show key found, {show.Slug}");
-				}
-				Shows[show.Slug] = show;
+				await JsonSerializer.SerializeAsync(fileStream, response.Items, new JsonSerializerOptions() { WriteIndented = true });
 			}
-		}
-		else
-		{
-			Console.WriteLine("Error: Could not load shows.");
-			Log.Error("Could not load shows.");
-			return new List<Show>();
-		}
-		
-		// Save to cache file
-		using (var fileStream = File.Create(showsCacheFile))
-		{
-			await JsonSerializer.SerializeAsync(fileStream, Shows, new JsonSerializerOptions() { WriteIndented = true });
-		}
-		
-		return Shows.Values.ToList();
-	}
-	
-	
-	public async Task<List<Show>> GetShows(Channel channel)
-	{
-		var response = await GetPaginatedAPIRequest<Show, ShowsResponse>(channel.Links.Shows);
-		if (response.Success)
-		{
+
 			return response.Items;
 		}
 		else
@@ -678,6 +632,7 @@ public class RTClient
 			return new List<Show>();
 		}
 	}
+	
 
 	public async Task<List<Season>> GetSeasons(string showSlug)
 	{

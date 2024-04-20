@@ -55,18 +55,47 @@ class Program
 		
 		
 		var listCommand = new Command("list", "Lists data from roosterteeth.com, used to find stubs for the download command.");
-		var listChannelOption = new Option<bool>(new string[] { "--channels" }, "Lists all channels");
-		var listShowOption = new Option<bool>(new string[] { "--shows" }, "Lists all shows.");
-		listCommand.AddOption(listChannelOption);
-		listCommand.AddOption(listShowOption);
-		listCommand.SetHandler(ListAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, listChannelOption, listShowOption);
-
+		{
+			var listChannelsCommand = new Command("channels", "Lists all channels.");
+			listChannelsCommand.SetHandler(ListChannelsAsync);
+			listCommand.AddCommand(listChannelsCommand);
+			
+			var listGenresommand = new Command("genres", "Lists all genres.");
+			listGenresommand.SetHandler(ListGenresAsync);
+			listCommand.AddCommand(listGenresommand);
+			
+			var listShowsCommand = new Command("shows", "Lists all shows.");
+			var listShowsChannelOption = new Option<string>(new string[] { "--channel" }, "List shows for specific channel slug. Leave empty to fetch all shows.");
+			listShowsCommand.AddOption(listShowsChannelOption);
+			listShowsCommand.SetHandler(ListShowsAsync, listShowsChannelOption);
+			listCommand.AddCommand(listShowsCommand);
+		}
 		
 		rootCommand.Add(downloadCommand);
 		rootCommand.Add(listCommand);
 		
 		//rootCommand.SetHandler(RunAsync, outputOption);
 		return await rootCommand.InvokeAsync(args);
+	}
+
+	static async Task<int> SetupClientAsync(int globalThreads = 1, bool globalUseCache = true)
+	{
+		Log.Information("~~ Rooster Teeth Archiver ~~");
+		Storage.Init("output");
+		
+		_rtClient = new RTClient()
+		{
+			NumberOfThreads = globalThreads,
+			UseCache = globalUseCache,
+		};
+		
+		var didAuthenticate = await Authenticate();
+		if (didAuthenticate == false)
+		{
+			return 1;
+		}
+
+		return 0;
 	}
 
 	static async Task<int> DownloadAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool downloadApi, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
@@ -162,8 +191,6 @@ class Program
 
 	static async Task<int> ListAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool listChannels, bool listShows)
 	{
-		Log.Information("~~ Rooster Teeth Archiver ~~");
-		Storage.Init(globalOutputPath);
 		
 		Console.WriteLine($"globalOutputPath: {globalOutputPath}");
 		Console.WriteLine($"globalThreads: {globalThreads}");
@@ -171,17 +198,10 @@ class Program
 		Console.WriteLine($"listChannels: {listChannels}");
 		Console.WriteLine($"listShows: {listShows}");
 		
-		
-		_rtClient = new RTClient()
+	//	var returnCode = 
+
+		if (listChannels)
 		{
-			NumberOfThreads = globalThreads,
-			UseCache = globalUseCache,
-		};
-		
-		var didAuthenticate = await Authenticate();
-		if (didAuthenticate == false)
-		{
-			return 1;
 		}
 		
 		return 0;
@@ -251,6 +271,71 @@ class Program
 		Log.Information($"Welcome {meResponse?.Attributes.Username}");
 		return true;
 	}
+
+	static async Task<int> ListChannelsAsync()
+	{
+		Log.Information("Listing channels");
+		var channels = await _rtClient.GetChannels();
+		Log.Information($"Found {channels.Count} channels.");
+		foreach (var channel in channels)
+		{
+			Log.Information($"Name: {channel.Name}");
+			Log.Information($"Channel slug: {channel.Slug}\n");
+		}
+		
+		return 1;
+	}
+
+	static async Task<int> ListGenresAsync()
+	{
+		var setupClientResult = await SetupClientAsync();
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+		
+		Log.Information("Listing genres");
+		var genres = await _rtClient.GetGenres();
+		Log.Information($"Found {genres.Count} genres.");
+		foreach (var genre in genres)
+		{
+			Log.Information($"Name: {genre.Name}");
+			Log.Information($"Genre slug: {genre.Slug}\n");
+		}
+		
+		return 1;
+	}
+	
+	
+	
+	static async Task<int> ListShowsAsync(string channel = "")
+	{
+		var setupClientResult = await SetupClientAsync();
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		var filterChannels = (string.IsNullOrEmpty(channel) == false);
+		
+		Log.Information("Listing shows");
+		var shows = await _rtClient.GetShows();
+		Log.Information($"Found {shows.Count} shows.");
+		foreach (var show in shows)
+		{
+			if (filterChannels && channel == show.Attributes.ChannelSlug)
+			{
+				Log.Information($"Name: {show.Title}");
+				Log.Information($"Show slug: {show.Slug}\n");
+				Log.Information($"Channel slug: {show.Attributes.ChannelSlug}");
+			}
+		}
+
+		return 1;
+	}
+	
+	
+	
 }
 
 
