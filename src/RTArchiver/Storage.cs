@@ -12,18 +12,7 @@ public class Storage
 	public static string DatabasePath { get; private set; } = string.Empty;
 	public static string TempPath { get; private set; } = string.Empty;
 	public static string SitemapPath { get; private set; } = string.Empty;
-
-	/*
-	static Storage()
-	{
-		var archiveCachePath = Environment.GetEnvironmentVariable("RT_ARCHIVE_PATH");
-		if (string.IsNullOrEmpty(archiveCachePath) == true)
-		{
-			archiveCachePath = "archive";
-		}
-	}
-	*/
-
+	
 	public static void Init(string archiveCachePath)
 	{
 		// This is really just dud code, it causes the system to setup the folders we actually use for logging.
