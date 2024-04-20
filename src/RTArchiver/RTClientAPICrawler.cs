@@ -111,7 +111,7 @@ public class RTClientAPICrawler
 			var allThreadsDead = true;
 			foreach (var thread in _threads)
 			{
-				Console.WriteLine(thread.ThreadState);
+				Log.Information(thread.ThreadState);
 				if (thread.ThreadState == ThreadState.Running)
 				{
 					allThreadsDead = false;
@@ -135,7 +135,7 @@ public class RTClientAPICrawler
 
 	async Task CacheGoBrrrr_Thread(int threadNumber)
 	{
-		Console.WriteLine($"Starting thread: {threadNumber}");
+		Log.Information($"Starting thread: {threadNumber}");
 		try
 		{
 			// Used to create a random sleep duration.
@@ -143,7 +143,7 @@ public class RTClientAPICrawler
 			var failedToFetchCount = 0;
 			do
 			{
-				Console.WriteLine($"_apisToFetch.Count: {_apisToFetch.Count}");
+				Log.Information($"_apisToFetch.Count: {_apisToFetch.Count}");
 
 				var didLoad = false;
 
@@ -191,17 +191,17 @@ public class RTClientAPICrawler
 		}
 		catch (Exception err2)
 		{
-			Console.WriteLine($"Error in thread: {threadNumber}");
+			Log.Error($"Error in thread: {threadNumber}");
 
 			Debugger.Break();
 		}
 		finally
 		{
-			Console.WriteLine($"Finally thread: {threadNumber}");
+			Log.Information($"Finally thread: {threadNumber}");
 
 		}
 		
-		Console.WriteLine($"Ending thread: {threadNumber}");
+		Log.Information($"Ending thread: {threadNumber}");
 
 		Debugger.Break();
 	}
@@ -236,7 +236,6 @@ public class RTClientAPICrawler
 		else
 		{
 			// If we failed we stop.
-			Console.WriteLine($"Error: Could not make the cache go brr- {linkToCache}");
 			Log.Error($"Could not make the cache go brr - {linkToCache}");
 			return;
 		}

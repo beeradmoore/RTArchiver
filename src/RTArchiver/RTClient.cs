@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.Specialized;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
@@ -13,6 +14,7 @@ using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
 using RTArchiver.Extensions;
+using RunProcessAsTask;
 using Serilog;
 using Serilog.Core;
 using SQLite;
@@ -30,6 +32,10 @@ public class RTClient
 
 	public SQLiteConnection CacheSQLiteConnection { get; init; }
 
+	public int NumberOfThreads { get; set; } = Environment.ProcessorCount;
+
+	public bool UseCache { get; set; } = true;
+	
 	public RTClient()
 	{
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
@@ -65,7 +71,7 @@ public class RTClient
 			if (authResponse == null)
 			{
 				Log.Error("Could not get a valid response from the server.");
-				Console.WriteLine("Error: Could not get a valid response from the server.");
+				//ine("Error: Could not get a valid response from the server.");
 				Logout();
 				return false;
 			}
@@ -910,7 +916,7 @@ public class RTClient
 
 	public async Task DownloadSitemapsAsync()
 	{
-		var sitemapSqliteConnection = new SQLiteConnection(Path.Combine(Storage.DatabasePath, "sitemap.db"));
+		var sitemapSqliteConnection = new SQLiteConnection(Path.Combine(Storage.SitemapPath, "sitemap.db"));
 		
 		// TODO: Backup DB?
 		//_sitemapSqliteConnection.Backup();
@@ -947,28 +953,35 @@ public class RTClient
 			return;
 		}
 
-		foreach (var sitemap in sitemapIndex.Sitemaps)
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = NumberOfThreads,
+		};
+		
+		Parallel.ForEach(sitemapIndex.Sitemaps, parallelOptions, (sitemap, token) =>
 		{
 			sitemap.Id = Sitemap.GetIdFromLocation(sitemap.Location);
 			sitemap.Tag = Sitemap.GetTagFromLocation(sitemap.Location);
 			sitemapSqliteConnection.InsertOrReplace(sitemap);
-		}
-		
-		foreach (var sitemap in sitemapIndex.Sitemaps)
+		});
+
+		var transactionLock = new object();
+
+		await Parallel.ForEachAsync(sitemapIndex.Sitemaps, parallelOptions, async (sitemap, token) =>
 		{
 			var sitemapPath = await DownloadSitemapAsync(sitemap.Location);
-			
+
 			if (string.IsNullOrEmpty(sitemapPath))
 			{
 				// This error should already have been handled.
 				return;
 			}
-			
+
 			var stopwatch = new Stopwatch();
 			stopwatch.Start();
-			
+
 			Log.Information($"{sitemap.Tag} - starting");
-			
+
 			if (sitemap.Tag == "static-pages")
 			{
 				StaticPageSet? staticPageSet = null;
@@ -982,29 +995,33 @@ public class RTClient
 				{
 					Log.Error($"Could not load sitemap - {sitemapPath}");
 					Debugger.Break();
-					continue;
+					return;
 				}
 
 				Log.Information($"{sitemap.Tag} - Found {staticPageSet.Urls.Count} items");
 
 				var dbStaticPages = sitemapSqliteConnection.Table<StaticPage>().ToList();
-				sitemapSqliteConnection.BeginTransaction();
-				foreach (var staticPage in staticPageSet.Urls)
+				lock (transactionLock)
 				{
-					var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
-					
-					if (dbStaticPage is null)
+					sitemapSqliteConnection.BeginTransaction();
+					foreach (var staticPage in staticPageSet.Urls)
 					{
-						staticPage.Guid = Guid.NewGuid().ToByteArray();
+						var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
+
+						if (dbStaticPage is null)
+						{
+							staticPage.Guid = Guid.NewGuid().ToByteArray();
+						}
+						else
+						{
+							staticPage.Guid = dbStaticPage.Guid;
+						}
+
+						sitemapSqliteConnection.InsertOrReplace(staticPage);
 					}
-					else
-					{
-						staticPage.Guid = dbStaticPage.Guid;
-					}
-					sitemapSqliteConnection.InsertOrReplace(staticPage);
+
+					sitemapSqliteConnection.Commit();
 				}
-				
-				sitemapSqliteConnection.Commit();
 			}
 			else if (sitemap.Tag == "rooster-teeth" ||
 			         sitemap.Tag == "achievement-hunter" ||
@@ -1029,56 +1046,62 @@ public class RTClient
 					var serializer = new XmlSerializer(typeof(VideoSet));
 					videoSet = (VideoSet)serializer.Deserialize(reader);
 				}
-				
+
 				//var video = videoSet.Urls.First();
 
 				if (videoSet is null)
 				{
 					Log.Error($"Could not load sitemap - {sitemapPath}");
 					Debugger.Break();
-					continue;
+					return;
 				}
-				
-				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls.Count} items");
-				
-				var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
-				sitemapSqliteConnection.BeginTransaction();
-				foreach (var videoUrl in videoSet.Urls)
-				{
-					videoUrl.SitemapId = sitemap.Id;
-					videoUrl.SitemapTag = sitemap.Tag;
-					var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
-					if (dbVideoUrl is null)
-					{
-						videoUrl.Guid = Guid.NewGuid().ToByteArray();
-					}
-					else
-					{
-						videoUrl.Guid = dbVideoUrl.Guid;
-					}
-					sitemapSqliteConnection.InsertOrReplace(videoUrl);
 
-					videoUrl.Video.Guid = videoUrl.Guid;
-					sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls.Count} items");
+
+				var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
+
+				lock (transactionLock)
+				{
+					sitemapSqliteConnection.BeginTransaction();
+					foreach (var videoUrl in videoSet.Urls)
+					{
+						videoUrl.SitemapId = sitemap.Id;
+						videoUrl.SitemapTag = sitemap.Tag;
+						var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
+						if (dbVideoUrl is null)
+						{
+							videoUrl.Guid = Guid.NewGuid().ToByteArray();
+						}
+						else
+						{
+							videoUrl.Guid = dbVideoUrl.Guid;
+						}
+
+						sitemapSqliteConnection.InsertOrReplace(videoUrl);
+
+						videoUrl.Video.Guid = videoUrl.Guid;
+						sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+					}
+
+					sitemapSqliteConnection.Commit();
 				}
-				sitemapSqliteConnection.Commit();
 			}
 			else
 			{
 				Log.Error($"Unknown sitemap tag found - {sitemap.Tag}");
 				Debugger.Break();
 			}
-			
+
 			stopwatch.Stop();
 			Log.Information($"{sitemap.Tag} - Finished, took {stopwatch.ElapsedMilliseconds}ms");
-		}
+		});
 	}
 	
 	async Task<string> DownloadSitemapAsync(string url)
 	{
 		Log.Information($"Downloading sitemap - {url}");
 		var sitemapFile = url.Replace("https://svod-be.roosterteeth.com/", string.Empty, StringComparison.OrdinalIgnoreCase).Replace("/", "_", StringComparison.OrdinalIgnoreCase);
-		var cacheFile = Path.Combine(Storage.CachePath, sitemapFile);
+		var cacheFile = Path.Combine(Storage.SitemapPath, sitemapFile);
 
 		try
 		{
@@ -1109,5 +1132,193 @@ public class RTClient
 			Debugger.Break();
 			return string.Empty;
 		}
+	}
+
+	public async Task DownloadAllAsync()
+	{
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_*.json", SearchOption.AllDirectories);
+
+		/*
+		List<string> episodes = new List<string>();
+		List<string> bonusFeatures = new List<string>();
+		*/
+		List<string> videos = new List<string>();
+		
+		
+		var ids = new Dictionary<long, int>(jsonFiles.Length);
+		var contentName = new Dictionary<string, int>(jsonFiles.Length);
+
+		//Debugger.Break();
+
+
+		var dictionaryLock = new object();
+		
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = 4,
+		};
+		
+
+		var tempPath = Path.Combine(Storage.TempPath, "rt-archiver");
+		if (Directory.Exists(tempPath))
+		{
+			var tempPathGuid = Path.Combine(Storage.TempPath, $"temp_{Guid.NewGuid().ToString("D")}");
+
+			Directory.Move(tempPath, tempPathGuid);
+			Directory.Delete(tempPathGuid, true);
+		}
+		Directory.CreateDirectory(tempPath);
+		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
+		{
+			Log.Information($"Reading: {jsonFile}");
+			//var fileData = File.ReadAllText(jsonFile);
+			using (var fileStream = File.OpenRead(jsonFile))
+			{
+				var videosResponse = await JsonSerializer.DeserializeAsync<RTArchiver.Data.Responses.VideosResponse>(fileStream);
+
+				if (videosResponse is null)
+				{
+					Log.Error($"Error: videosResponse was null");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Data.Count == 0)
+				{
+					Log.Error($"Error: Zero videos found - {jsonFile}");
+					return;
+				}
+		
+
+				if (videosResponse.Data.Count > 1)
+				{
+					Log.Error($"Error: More than 1 videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Data[0].Type == "video")
+				{
+					videos.Add(jsonFile);
+				}
+				else
+				{
+					Debugger.Break();
+					return;
+				}
+				
+				var id = videosResponse.Data[0].Id;
+				
+				try
+				{
+					
+					
+					var downloadUrl = videosResponse.Data[0].Links?.Download ?? string.Empty;
+					if (string.IsNullOrEmpty(downloadUrl))
+					{
+						Debugger.Break();
+					}
+					
+					var outputFile = $"{id}.mkv";
+					var tempOutputPath = Path.Combine(tempPath, outputFile);
+					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
+
+					if (Path.Exists(outputPath))
+					{
+						Log.Information($"Skipping {outputPath}");
+						return;
+					}
+					Log.Information($"Downloading {outputFile}");
+					//Console.WriteLine($"yt-dlp --merge-output-format mkv  --paths \"temp:{tempPath}\" --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 2 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+
+					var processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv  --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+					if (processResults.ExitCode == 0)
+					{
+						File.Move(tempOutputPath, outputPath);
+					}
+					else
+					{
+						throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n");
+					}
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not download video ID {id}, {jsonFile}");
+				}
+
+				return;
+				
+				/*
+				 episode
+				else if (videosResponse.Data[0].Type == "bonus_feature")
+				{
+					bonusFeatures.Add(jsonFile);
+				}
+				else if (videosResponse.Data[0].Type == "video")
+				{
+					videos.Add(jsonFile);
+				}
+				else
+				{
+					Debugger.Break();
+				}
+				*/
+
+				var content = videosResponse.Data[0].Links?.Content ?? string.Empty;
+				if (string.IsNullOrEmpty(content))
+				{
+					Debugger.Break();
+				}
+				
+				try
+				{
+					lock (dictionaryLock)
+					{
+						if (ids.TryAdd(id, 1) == false)
+						{
+							++ids[id];
+						}
+
+						if (contentName.TryAdd(content, 1) == false)
+						{
+							++contentName[content];
+						}
+					}
+				}
+				catch (Exception err)
+				{
+					Console.WriteLine(err);
+					Debugger.Break();
+				}
+		
+			}
+		});
+		
+		
+		/*
+		var frozenDictionary = contentName.ToFrozenDictionary();
+		var idKeys = frozenDictionary.Keys.ToList();
+		idKeys.Sort();
+
+		// --paths "temp:path"
+		using (var fileStream = File.Create("video_path.txt"))
+		{
+			using (var streamWriter = new StreamWriter(fileStream))
+			{
+				foreach (var id in idKeys)
+				{
+					try
+					{
+						streamWriter.WriteLine($"{id} - {frozenDictionary[id]}");
+					}
+					catch (Exception err)
+					{
+						Console.WriteLine($"{id} not found in frozenDictionary");
+						Debugger.Break();
+					}
+
+				}
+			}
+		}*/
 	}
 }
