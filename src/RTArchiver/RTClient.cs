@@ -1584,8 +1584,8 @@ public class RTClient
 
 	}
 
-	/*
-	public async Task DownloadAllAsync()
+	
+	public async Task DownloadVideosAsync()
 	{
 		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_*.json", SearchOption.AllDirectories);
 
@@ -1603,7 +1603,7 @@ public class RTClient
 
 		var parallelOptions = new ParallelOptions()
 		{
-			MaxDegreeOfParallelism = 4,
+			MaxDegreeOfParallelism = NumberOfThreads,
 		};
 
 
@@ -1622,7 +1622,7 @@ public class RTClient
 			//var fileData = File.ReadAllText(jsonFile);
 			using (var fileStream = File.OpenRead(jsonFile))
 			{
-				var videosResponse = await JsonSerializer.DeserializeAsync<RTArchiver.Data.Responses.VideosResponse>(fileStream);
+				var videosResponse = await JsonSerializer.DeserializeAsync<VideosResponse>(fileStream, cancellationToken: state);
 
 				if (videosResponse is null)
 				{
@@ -1667,21 +1667,34 @@ public class RTClient
 						Debugger.Break();
 					}
 
+					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({id}).mkv";
+					var tempOutputPath = Path.Combine(tempPath, tempOutputFile);
+					
 					var outputFile = $"{id}.mkv";
-					var tempOutputPath = Path.Combine(tempPath, outputFile);
 					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
 
 					if (Path.Exists(outputPath))
 					{
+						var fileInfo = new FileInfo(outputPath);
+						if (fileInfo.Length == 0)
+						{
+							Log.Error($"File {outputPath} is 0 bytes.");
+							return;
+						}
+
 						Log.Information($"Skipping {outputPath}");
 						return;
 					}
 					Log.Information($"Downloading {outputFile}");
-					//Console.WriteLine($"yt-dlp --merge-output-format mkv  --paths \"temp:{tempPath}\" --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 2 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
 
-					var processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv  --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+					var processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
 					if (processResults.ExitCode == 0)
 					{
+						var fileInfo = new FileInfo(tempOutputPath);
+						if (fileInfo.Length == 0)
+						{
+							throw new Exception($"File {tempOutputPath} is 0 bytes, not moving.");	
+						}
 						File.Move(tempOutputPath, outputPath);
 					}
 					else
@@ -1693,82 +1706,7 @@ public class RTClient
 				{
 					Log.Error(err, $"Could not download video ID {id}, {jsonFile}");
 				}
-
-				return;
-
-				/*
-				 episode
-				else if (videosResponse.Data[0].Type == "bonus_feature")
-				{
-					bonusFeatures.Add(jsonFile);
-				}
-				else if (videosResponse.Data[0].Type == "video")
-				{
-					videos.Add(jsonFile);
-				}
-				else
-				{
-					Debugger.Break();
-				}
-				*/
-
-				/*
-				var content = videosResponse.Data[0].Links?.Content ?? string.Empty;
-				if (string.IsNullOrEmpty(content))
-				{
-					Debugger.Break();
-				}
-				
-				try
-				{
-					lock (dictionaryLock)
-					{
-						if (ids.TryAdd(id, 1) == false)
-						{
-							++ids[id];
-						}
-
-						if (contentName.TryAdd(content, 1) == false)
-						{
-							++contentName[content];
-						}
-					}
-				}
-				catch (Exception err)
-				{
-					Console.WriteLine(err);
-					Debugger.Break();
-				}
-				*/
-		/*
 			}
 		});
-		
-		*/
-		/*
-		var frozenDictionary = contentName.ToFrozenDictionary();
-		var idKeys = frozenDictionary.Keys.ToList();
-		idKeys.Sort();
-
-		// --paths "temp:path"
-		using (var fileStream = File.Create("video_path.txt"))
-		{
-			using (var streamWriter = new StreamWriter(fileStream))
-			{
-				foreach (var id in idKeys)
-				{
-					try
-					{
-						streamWriter.WriteLine($"{id} - {frozenDictionary[id]}");
-					}
-					catch (Exception err)
-					{
-						Console.WriteLine($"{id} not found in frozenDictionary");
-						Debugger.Break();
-					}
-
-				}
-			}
-		}
-	}*/
+	}
 }

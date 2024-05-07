@@ -126,7 +126,7 @@ public class RTClientAPICrawler
 		var isRunning = true;
 		do
 		{
-			
+			#if DEBUG
 			if (Console.KeyAvailable)
 			{
 				var key = Console.ReadKey(true);
@@ -138,6 +138,7 @@ public class RTClientAPICrawler
 				}
 			}
 			else
+			#endif
 			{
 				Thread.Sleep(5000);
 

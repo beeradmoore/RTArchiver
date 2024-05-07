@@ -45,26 +45,34 @@ class Program
 		var downloadApiOption = new Option<bool>(new string[] { "--api" }, () => false, "Downloads all api data (est. 8gb).");
 		var downloadChannelOption = new Option<string>(new string[] { "--channel" }, "Downloads everything on a specific channels stub");
 		var downloadShowOption = new Option<string>(new string[] { "--show" }, "Downloads everything on a specific show stub.");
-		var downloadSitemapOption = new Option<bool>(new string[] { "--sitemap" }, () => false, "Downloads sitemap.xml (est. 40mb)");
+		//var downloadSitemapOption = new Option<bool>(new string[] { "--sitemap" }, () => false, "Downloads sitemap.xml (est. 40mb)");
 		var downloadConcurrentFragmentsOption = new Option<int>(new string[] { "--concurrent-fragments", "-cf" }, () => 10, "Sets the number of concurrent fragments used in yt-dlp.");
 		downloadCommand.AddOption(downloadApiOption);
 		downloadCommand.AddOption(downloadChannelOption);
 		downloadCommand.AddOption(downloadShowOption);
-		downloadCommand.AddOption(downloadSitemapOption);
+		//downloadCommand.AddOption(downloadSitemapOption);
 		downloadCommand.AddOption(downloadConcurrentFragmentsOption);
-		downloadCommand.SetHandler(DownloadAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadApiOption, downloadChannelOption, downloadShowOption, downloadSitemapOption, downloadConcurrentFragmentsOption);
+		//downloadCommand.SetHandler(DownloadAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadApiOption, downloadChannelOption, downloadShowOption, downloadSitemapOption, downloadConcurrentFragmentsOption);
 
-		var downloadBuildCommand = new Command("build", "Builds a download manifest which can be processed by \"download process\"");
-		downloadBuildCommand.AddOption(downloadChannelOption);
-		downloadBuildCommand.AddOption(downloadShowOption);
-		downloadBuildCommand.AddOption(downloadSitemapOption);
-		downloadBuildCommand.AddOption(downloadConcurrentFragmentsOption);
-		downloadBuildCommand.SetHandler(DownloadBuildAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadChannelOption, downloadShowOption, downloadSitemapOption, downloadConcurrentFragmentsOption);
-		downloadCommand.AddCommand(downloadBuildCommand);
+		//var downloadBuildCommand = new Command("build", "Builds a download manifest which can be processed by \"download process\"");
+		//downloadBuildCommand.AddOption(downloadChannelOption);
+		//downloadBuildCommand.AddOption(downloadShowOption);
+		//ownloadBuildCommand.AddOption(downloadSitemapOption);
+		//downloadBuildCommand.AddOption(downloadConcurrentFragmentsOption);
+		//downloadBuildCommand.SetHandler(DownloadBuildAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadChannelOption, downloadShowOption, downloadConcurrentFragmentsOption);
+		//downloadCommand.AddCommand(downloadBuildCommand);
 
 		var downloadImagesCommand = new Command("images", "Downloads all images for current api cache.");
 		downloadImagesCommand.SetHandler(DownloadImagesAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
 		downloadCommand.AddCommand(downloadImagesCommand);
+		
+		var downloadVideosCommand = new Command("videos", "Downloads all videos for current api cache.");
+		downloadVideosCommand.SetHandler(DownloadVideosAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadVideosCommand);
+		
+		var downloadSitemapsCommand = new Command("sitemaps", "Downloads all videos for current api cache.");
+		downloadSitemapsCommand.SetHandler(DownloadSitemapsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadSitemapsCommand);
 		
 		rootCommand.Add(downloadCommand);
 		
@@ -173,6 +181,7 @@ class Program
 		return 0;
 	}
 
+	/*
 	static async Task<int> DownloadAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool downloadApi, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
 	{
 		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
@@ -204,8 +213,10 @@ class Program
 
 		return 0;
 	}
+	*/
 
-	static async Task<int> DownloadBuildAsync(string globalOutputPath, int globalThreads, bool globalUseCache, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
+	/*
+	static async Task<int> DownloadBuildAsync(string globalOutputPath, int globalThreads, bool globalUseCache, string downloadChannel, string downloadShow, int concurrentFragments)
 	{
 		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
 		if (setupClientResult != 0)
@@ -260,6 +271,7 @@ class Program
 
 		return 1;
 	}
+	*/
 	
 	static async Task<int> DownloadImagesAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
@@ -271,6 +283,32 @@ class Program
 
 		await _rtClient.DownloadImagesAsync();
 
+		return 0;
+	}
+	
+	
+	static async Task<int> DownloadVideosAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadVideosAsync();
+
+		return 0;
+	}
+	
+	static async Task<int> DownloadSitemapsAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadSitemapsAsync();
 
 		return 0;
 	}
@@ -424,7 +462,7 @@ class Program
 
 	static async Task<int> CrawlAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
-		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, false);
 		if (setupClientResult != 0)
 		{
 			return setupClientResult;
