@@ -74,6 +74,10 @@ class Program
 		downloadSitemapsCommand.SetHandler(DownloadSitemapsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
 		downloadCommand.AddCommand(downloadSitemapsCommand);
 		
+		var downloadCommentsCommand = new Command("comments", "Downloads all comments for current api cache.");
+		downloadCommentsCommand.SetHandler(DownloadCommentsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadCommentsCommand);
+		
 		rootCommand.Add(downloadCommand);
 		
 		
@@ -313,6 +317,20 @@ class Program
 		return 0;
 	}
 	
+	static async Task<int> DownloadCommentsAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadCommentsAsync();
+
+		return 0;
+	}
+
+	
 	static async Task<int> PlaygroundAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
 		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
@@ -459,6 +477,7 @@ class Program
 
 		return 1;
 	}
+
 
 	static async Task<int> CrawlAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{

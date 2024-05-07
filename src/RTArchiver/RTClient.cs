@@ -1111,6 +1111,11 @@ public class RTClient
 		}
 	}
 
+	public async Task DownloadCommentsAsync()
+	{
+		// TODO
+		await Task.Delay(1);
+	}
 
 	public async Task DownloadImagesAsync()
 	{
