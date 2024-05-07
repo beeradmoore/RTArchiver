@@ -1634,19 +1634,19 @@ public class RTClient
 	
 	public async Task DownloadVideosAsync()
 	{
-		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_*.json", SearchOption.AllDirectories);
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "*.json", SearchOption.TopDirectoryOnly);
 
 
-		List<string> videos = new List<string>();
+		//List<string> videos = new List<string>();
 
 
-		var ids = new Dictionary<long, int>(jsonFiles.Length);
-		var contentName = new Dictionary<string, int>(jsonFiles.Length);
+		//var ids = new Dictionary<long, int>(jsonFiles.Length);
+		//var contentName = new Dictionary<string, int>(jsonFiles.Length);
 
 		//Debugger.Break();
 
 
-		var dictionaryLock = new object();
+		//var dictionaryLock = new object();
 
 		var parallelOptions = new ParallelOptions()
 		{
@@ -1663,61 +1663,103 @@ public class RTClient
 			Directory.Delete(tempPathGuid, true);
 		}
 		Directory.CreateDirectory(tempPath);
+		
 		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
 		{
 			Log.Information($"Reading: {jsonFile}");
-			//var fileData = File.ReadAllText(jsonFile);
 			using (var fileStream = File.OpenRead(jsonFile))
 			{
-				var videosResponse = await JsonSerializer.DeserializeAsync<VideosResponse>(fileStream, cancellationToken: state);
+				var episodesResponse = await JsonSerializer.DeserializeAsync<EpisodesResponse>(fileStream, cancellationToken: state);
 
-				if (videosResponse is null)
+				if (episodesResponse is null)
 				{
-					Log.Error($"Error: videosResponse was null");
+					Log.Error($"episodesResponse was null");
 					Debugger.Break();
 					return;
 				}
 
-				if (videosResponse.Data.Count == 0)
+				if (episodesResponse.Data.Count == 0)
 				{
-					Log.Error($"Error: Zero videos found - {jsonFile}");
-					return;
-				}
-
-
-				if (videosResponse.Data.Count > 1)
-				{
-					Log.Error($"Error: More than 1 videos found - {jsonFile}");
+					Log.Error($"Zero episodes found - {jsonFile}");
 					Debugger.Break();
 					return;
 				}
 
-				if (videosResponse.Data[0].Type == "video")
+				if (episodesResponse.Data.Count > 1)
 				{
-					videos.Add(jsonFile);
-				}
-				else
-				{
+					Log.Error($"More than 1 episodes found - {jsonFile}");
 					Debugger.Break();
 					return;
 				}
 
-				var id = videosResponse.Data[0].Id;
+				if (episodesResponse.Data[0].Type != "episode" &&
+				    episodesResponse.Data[0].Type != "bonus_feature")
+				{
+					Log.Error($"Invalid episode type: {episodesResponse.Data[0].Type}");
+					Debugger.Break();
+					return;
+				}
 
+				var episode = episodesResponse.Data[0];
+
+				if (string.IsNullOrEmpty(episode.Links.Videos))
+				{
+					Log.Error($"Videos link is null or empty for episode {episode.Attributes.Slug}.");
+					Debugger.Break();
+					return;
+				}
+
+				var videosResponse = await GetPaginatedAPIRequest<Video, VideosResponse>(episode.Links.Videos, state);
+				if (videosResponse.Success == false)
+				{
+					Log.Error($"videosResponse was not successful");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Items.Count == 0)
+				{
+					Log.Error($"Zero videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+
+				if (videosResponse.Items.Count > 1)
+				{
+					Log.Error($"More than 1 videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Items[0].Type != "video")
+				{
+					Log.Error($"Invalid video type: {episodesResponse.Data[0].Type}");
+					Debugger.Break();
+					return;
+				}
+
+				var video = videosResponse.Items[0];
+				var videoId = video.Id;
+
+				Log.Information($"VideoId: {videoId}");
+				/*
 				try
 				{
 
 
-					var downloadUrl = videosResponse.Data[0].Links?.Download ?? string.Empty;
+					var downloadUrl = video.Links?.Download ?? string.Empty;
 					if (string.IsNullOrEmpty(downloadUrl))
 					{
+						Log.Error($"Download error for video {episode.Attributes.Slug} was empty.");
 						Debugger.Break();
+						return;
 					}
 
-					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({id}).mkv";
+					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({videoId}).mkv";
 					var tempOutputPath = Path.Combine(tempPath, tempOutputFile);
-					
-					var outputFile = $"{id}.mkv";
+
+					var outputFile = $"{videoId}.mkv";
 					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
 
 					if (Path.Exists(outputPath))
@@ -1740,7 +1782,7 @@ public class RTClient
 						var fileInfo = new FileInfo(tempOutputPath);
 						if (fileInfo.Length == 0)
 						{
-							throw new Exception($"File {tempOutputPath} is 0 bytes, not moving.");	
+							throw new Exception($"File {tempOutputPath} is 0 bytes, not moving.");
 						}
 						File.Move(tempOutputPath, outputPath);
 					}
@@ -1751,8 +1793,9 @@ public class RTClient
 				}
 				catch (Exception err)
 				{
-					Log.Error(err, $"Could not download video ID {id}, {jsonFile}");
+					Log.Error(err, $"Could not download video ID {videoId}, {jsonFile}");
 				}
+				*/
 			}
 		});
 	}
