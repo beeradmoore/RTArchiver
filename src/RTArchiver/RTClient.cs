@@ -1116,6 +1116,48 @@ public class RTClient
 		// TODO
 		await Task.Delay(1);
 	}
+	
+	public async Task DownloadUsersAsync()
+	{
+		// TODO
+		await Task.Delay(1);
+	}
+
+	public async Task DownloadBadgesAsync()
+	{
+		try
+		{
+			var badgesResponseString = await _httpClient.GetStringAsync("https://business-service.roosterteeth.com/api/v1/badges");
+			var badgesFile = Path.Combine(Storage.BadgesPath, "badges.json");
+			var badgesResponse = JsonSerializer.Deserialize<List<Badge>>(badgesResponseString);
+			if (badgesResponse is null)
+			{
+				throw new Exception("badgesResponse was null");
+			}
+			File.WriteAllText(badgesFile, badgesResponseString);
+
+			foreach (var badge in badgesResponse)
+			{
+				var extension = Path.GetExtension(badge.CdnUrl);
+				var badgeFile = Path.Combine(Storage.BadgesPath, $"{badge.Label}{extension}");
+				if (File.Exists(badgeFile) == false)
+				{
+					using (var response = await _httpClient.GetStreamAsync(badge.CdnUrl))
+					{
+						using (var fileStream = File.Create(badgeFile))
+						{
+							await response.CopyToAsync(fileStream);
+						}
+					}
+				}
+			}
+		}
+		catch (Exception err)
+		{
+			Log.Error(err, "Could not download badges.");
+		}
+		
+	}
 
 	public async Task DownloadImagesAsync()
 	{

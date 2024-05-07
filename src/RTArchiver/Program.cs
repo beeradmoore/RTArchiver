@@ -78,6 +78,14 @@ class Program
 		downloadCommentsCommand.SetHandler(DownloadCommentsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
 		downloadCommand.AddCommand(downloadCommentsCommand);
 		
+		var downloadBadgesCommand = new Command("badges", "Downloads site badges.");
+		downloadBadgesCommand.SetHandler(DownloadBadgesAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadBadgesCommand);
+		
+		var downloadUsersCommand = new Command("users", "Downloads all user profile data for current comment cache.");
+		downloadUsersCommand.SetHandler(DownloadUsersAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadUsersCommand);
+		
 		rootCommand.Add(downloadCommand);
 		
 		
@@ -326,6 +334,33 @@ class Program
 		}
 
 		await _rtClient.DownloadCommentsAsync();
+		await _rtClient.DownloadUsersAsync();
+
+		return 0;
+	}
+	
+	static async Task<int> DownloadUsersAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadUsersAsync();
+
+		return 0;
+	}
+	
+	static async Task<int> DownloadBadgesAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadBadgesAsync();
 
 		return 0;
 	}
