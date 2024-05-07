@@ -2,7 +2,7 @@
 
 namespace RTArchiver.Data
 {
-	public class Channel
+	public class Channel : IComparable<Channel>
 	{
 		[JsonPropertyName("id")]
 		public int Id { get; set; }
@@ -27,6 +27,16 @@ namespace RTArchiver.Data
 
 		[JsonIgnore]
 		public string Slug => Attributes?.Slug ?? string.Empty;
+
+		public int CompareTo(Channel? other)
+		{
+			if (other == null)
+			{
+				return 1;
+			}
+			
+			return string.Compare(Name, other.Name, StringComparison.Ordinal);
+		}
 	}
 
 	public class Channel_Attributes

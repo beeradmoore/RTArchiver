@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace RTArchiver.Data;
 
-public class Show
+public class Show : IComparable<Show>
 {
 	[JsonPropertyName("id")]
 	public int Id { get; set; }
@@ -30,6 +30,16 @@ public class Show
 
 	[JsonIgnore]
 	public string Slug => Attributes?.Slug ?? string.Empty;
+
+	public int CompareTo(Show? other)
+	{
+		if (other == null)
+		{
+			return 1;
+		}
+		
+		return string.Compare(Title, other.Title, StringComparison.Ordinal);
+	}
 }
 
 public class Show_Links

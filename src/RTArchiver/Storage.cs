@@ -12,6 +12,7 @@ public class Storage
 	public static string DatabasePath { get; private set; } = string.Empty;
 	public static string TempPath { get; private set; } = string.Empty;
 	public static string SitemapPath { get; private set; } = string.Empty;
+	public static string ImagesPath { get; private set; } = string.Empty;
 	
 	public static void Init(string archiveCachePath)
 	{
@@ -30,6 +31,7 @@ public class Storage
 		var databasePath = Path.Combine(archivePath, "database");
 		var tempPath = Path.Combine(archivePath, "temp");
 		var sitemapPath = Path.Combine(archivePath, "sitemap");
+		var imagesPath = Path.Combine(archivePath, "images");
 		try
 		{
 			if (Directory.Exists(archivePath) == false)
@@ -73,6 +75,12 @@ public class Storage
 				Log.Information($"Creating sitemap directory {sitemapPath}");
 				Directory.CreateDirectory(sitemapPath);
 			}
+		
+			if (Directory.Exists(imagesPath) == false)
+			{
+				Log.Information($"Creating images directory {imagesPath}");
+				Directory.CreateDirectory(imagesPath);
+			}
 			
 			Log.Logger = new LoggerConfiguration()
 				.WriteTo.Console(outputTemplate: "{Message:ij}{NewLine}{Exception}")
@@ -87,6 +95,7 @@ public class Storage
 			DatabasePath = databasePath;
 			TempPath = tempPath;
 			SitemapPath = sitemapPath;
+			ImagesPath = imagesPath;
 			
 			Log.Information($"Using archive directory {archivePath}");
 			Log.Information($"Using cache directory {cachePath}");
@@ -95,11 +104,11 @@ public class Storage
 			Log.Information($"Using database directory {databasePath}");
 			Log.Information($"Using temp directory {tempPath}");
 			Log.Information($"Using sitemap directory {sitemapPath}");
+			Log.Information($"Using images directory {imagesPath}");
 		}
 		catch (Exception err)
 		{
 			Log.Error(err, $"Could not create storage folders.");
-			Console.WriteLine("ERROR: Could not create storage folders.");
 			Environment.Exit(1);
 		}
 	}

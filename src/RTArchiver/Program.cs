@@ -15,7 +15,9 @@ using Serilog;
 
 class Program
 {
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
 	static RTClient _rtClient;
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
 	
 	static async Task<int> Main(string[] args)
 	{
@@ -44,75 +46,63 @@ class Program
 		var downloadChannelOption = new Option<string>(new string[] { "--channel" }, "Downloads everything on a specific channels stub");
 		var downloadShowOption = new Option<string>(new string[] { "--show" }, "Downloads everything on a specific show stub.");
 		var downloadSitemapOption = new Option<bool>(new string[] { "--sitemap" }, () => false, "Downloads sitemap.xml (est. 40mb)");
-		var downloadConcurrentFragmentsOption = new Option<int>(new string[] { "--concurrent-fragments", "-cf" }, () => 4, "Sets the number of concurrent fragments used in yt-dlp.");
+		var downloadConcurrentFragmentsOption = new Option<int>(new string[] { "--concurrent-fragments", "-cf" }, () => 10, "Sets the number of concurrent fragments used in yt-dlp.");
 		downloadCommand.AddOption(downloadApiOption);
 		downloadCommand.AddOption(downloadChannelOption);
 		downloadCommand.AddOption(downloadShowOption);
 		downloadCommand.AddOption(downloadSitemapOption);
 		downloadCommand.AddOption(downloadConcurrentFragmentsOption);
 		downloadCommand.SetHandler(DownloadAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadApiOption, downloadChannelOption, downloadShowOption, downloadSitemapOption, downloadConcurrentFragmentsOption);
+
+		var downloadBuildCommand = new Command("build", "Builds a download manifest which can be processed by \"download process\"");
+		downloadBuildCommand.AddOption(downloadChannelOption);
+		downloadBuildCommand.AddOption(downloadShowOption);
+		downloadBuildCommand.AddOption(downloadSitemapOption);
+		downloadBuildCommand.AddOption(downloadConcurrentFragmentsOption);
+		downloadBuildCommand.SetHandler(DownloadBuildAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadChannelOption, downloadShowOption, downloadSitemapOption, downloadConcurrentFragmentsOption);
+		downloadCommand.AddCommand(downloadBuildCommand);
+
+		var downloadImagesCommand = new Command("images", "Downloads all images for current api cache.");
+		downloadImagesCommand.SetHandler(DownloadImagesAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		downloadCommand.AddCommand(downloadImagesCommand);
 		
+		rootCommand.Add(downloadCommand);
 		
 		
 		var listCommand = new Command("list", "Lists data from roosterteeth.com, used to find stubs for the download command.");
-		{
-			var listChannelsCommand = new Command("channels", "Lists all channels.");
-			listChannelsCommand.SetHandler(ListChannelsAsync);
-			listCommand.AddCommand(listChannelsCommand);
-			
-			var listGenresommand = new Command("genres", "Lists all genres.");
-			listGenresommand.SetHandler(ListGenresAsync);
-			listCommand.AddCommand(listGenresommand);
-			
-			var listShowsCommand = new Command("shows", "Lists all shows.");
-			var listShowsChannelOption = new Option<string>(new string[] { "--channel" }, "List shows for specific channel slug. Leave empty to fetch all shows.");
-			listShowsCommand.AddOption(listShowsChannelOption);
-			listShowsCommand.SetHandler(ListShowsAsync, listShowsChannelOption);
-			listCommand.AddCommand(listShowsCommand);
-		}
 		
-		rootCommand.Add(downloadCommand);
+		var listChannelsCommand = new Command("channels", "Lists all channels.");
+		listChannelsCommand.SetHandler(ListChannelsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		listCommand.AddCommand(listChannelsCommand);
+		
+		var listGenresommand = new Command("genres", "Lists all genres.");
+		listGenresommand.SetHandler(ListGenresAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		listCommand.AddCommand(listGenresommand);
+		
+		var listShowsCommand = new Command("shows", "Lists all shows.");
+		var listShowsChannelOption = new Option<string>(new string[] { "--channel" }, "List shows for specific channel slug. Leave empty to fetch all shows.");
+		listShowsCommand.AddOption(listShowsChannelOption);
+		listShowsCommand.SetHandler(ListShowsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, listShowsChannelOption);
+		listCommand.AddCommand(listShowsCommand);
 		rootCommand.Add(listCommand);
+		
+		var crawlCommand = new Command("crawl", "Crawls over every endpoint it can find, attempts to 100% fill the API cache.");
+		crawlCommand.SetHandler(CrawlAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		rootCommand.Add(crawlCommand);
+		
+		
+		var playgroundCommand = new Command("playground", "Easy entry point to test different code");
+		playgroundCommand.SetHandler(PlaygroundAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		rootCommand.Add(playgroundCommand);
+		
+		
 		
 		//rootCommand.SetHandler(RunAsync, outputOption);
 		return await rootCommand.InvokeAsync(args);
 	}
 
-	static async Task<int> SetupClientAsync(int globalThreads = 1, bool globalUseCache = true)
+	static async Task<bool> CheckPrerequisites()
 	{
-		Log.Information("~~ Rooster Teeth Archiver ~~");
-		Storage.Init("output");
-		
-		_rtClient = new RTClient()
-		{
-			NumberOfThreads = globalThreads,
-			UseCache = globalUseCache,
-		};
-		
-		var didAuthenticate = await Authenticate();
-		if (didAuthenticate == false)
-		{
-			return 1;
-		}
-
-		return 0;
-	}
-
-	static async Task<int> DownloadAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool downloadApi, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
-	{
-		Log.Information("~~ Rooster Teeth Archiver ~~");
-		Storage.Init(globalOutputPath);
-		
-		Console.WriteLine($"globalOutputPath: {globalOutputPath}");
-		Console.WriteLine($"globalThreads: {globalThreads}");
-		Console.WriteLine($"globalUseCache: {globalUseCache}");
-		Console.WriteLine($"downloadApi: {downloadApi}");
-		Console.WriteLine($"downloadChannel: {downloadChannel}");
-		Console.WriteLine($"downloadShow: {downloadShow}");
-		Console.WriteLine($"downloadSitemap: {downloadSitemap}");
-		Console.WriteLine($"concurrentFragments: {concurrentFragments}");
-		
-		
 		
 		var hasLaunchWarnings = false;
 
@@ -160,24 +150,50 @@ class Program
 			hasLaunchWarnings = true;
 		}
 
+		return hasLaunchWarnings;
+	}
 
-		if (hasLaunchWarnings)
-		{
-			// Wait 5 seconds if there is launch warnings.
-			await Task.Delay(5000);
-		}
-
-
+	static async Task<int> SetupClientAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		Log.Information("~~ Rooster Teeth Archiver ~~");
+		Storage.Init(globalOutputPath);
+		
 		_rtClient = new RTClient()
 		{
 			NumberOfThreads = globalThreads,
 			UseCache = globalUseCache,
 		};
-			
+		
 		var didAuthenticate = await Authenticate();
 		if (didAuthenticate == false)
 		{
 			return 1;
+		}
+
+		return 0;
+	}
+
+	static async Task<int> DownloadAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool downloadApi, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+		
+		Console.WriteLine($"globalOutputPath: {globalOutputPath}");
+		Console.WriteLine($"globalThreads: {globalThreads}");
+		Console.WriteLine($"globalUseCache: {globalUseCache}");
+		Console.WriteLine($"downloadApi: {downloadApi}");
+		Console.WriteLine($"downloadChannel: {downloadChannel}");
+		Console.WriteLine($"downloadShow: {downloadShow}");
+		Console.WriteLine($"downloadSitemap: {downloadSitemap}");
+		Console.WriteLine($"concurrentFragments: {concurrentFragments}");
+		
+		if (await CheckPrerequisites())
+		{
+			// Wait 5 seconds if there is launch warnings.
+			await Task.Delay(5000);
 		}
 
 
@@ -189,23 +205,91 @@ class Program
 		return 0;
 	}
 
-	static async Task<int> ListAsync(string globalOutputPath, int globalThreads, bool globalUseCache, bool listChannels, bool listShows)
+	static async Task<int> DownloadBuildAsync(string globalOutputPath, int globalThreads, bool globalUseCache, string downloadChannel, string downloadShow, bool downloadSitemap, int concurrentFragments)
 	{
-		
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
 		Console.WriteLine($"globalOutputPath: {globalOutputPath}");
 		Console.WriteLine($"globalThreads: {globalThreads}");
 		Console.WriteLine($"globalUseCache: {globalUseCache}");
-		Console.WriteLine($"listChannels: {listChannels}");
-		Console.WriteLine($"listShows: {listShows}");
-		
-	//	var returnCode = 
+		Console.WriteLine($"downloadChannel: {downloadChannel}");
+		Console.WriteLine($"downloadShow: {downloadShow}");
+		Console.WriteLine($"downloadSitemap: {downloadSitemap}");
+		Console.WriteLine($"concurrentFragments: {concurrentFragments}");
 
-		if (listChannels)
+		if (await CheckPrerequisites())
 		{
+			// Wait 5 seconds if there is launch warnings.
+			await Task.Delay(5000);
 		}
+
+
+		_rtClient = new RTClient() { NumberOfThreads = globalThreads, UseCache = true, };
+
+		var didAuthenticate = await Authenticate();
+		if (didAuthenticate == false)
+		{
+			return 1;
+		}
+
+		var channels = await _rtClient.GetChannels();
+		var shows = await _rtClient.GetShows();
 		
+		foreach (var channel in channels)
+		{
+			foreach (var show in shows)
+			{
+				if (channel.Slug == show.Attributes.ChannelSlug)
+				{
+					Log.Information($"Name: {show.Title}");
+					Log.Information($"Show slug: {show.Slug}\n");
+					Log.Information($"Channel slug: {show.Attributes.ChannelSlug}");
+				}
+			}
+			
+			Debugger.Break();
+
+		}
+
+		
+		Debugger.Break();
+
+		return 1;
+	}
+	
+	static async Task<int> DownloadImagesAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.DownloadImagesAsync();
+
+
 		return 0;
 	}
+	
+	static async Task<int> PlaygroundAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.PlaygroundAsync();
+
+
+		return 0;
+	}
+	
+	
 
 	static async Task<bool> Authenticate()
 	{
@@ -272,8 +356,14 @@ class Program
 		return true;
 	}
 
-	static async Task<int> ListChannelsAsync()
+	static async Task<int> ListChannelsAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+		
 		Log.Information("Listing channels");
 		var channels = await _rtClient.GetChannels();
 		Log.Information($"Found {channels.Count} channels.");
@@ -286,9 +376,9 @@ class Program
 		return 1;
 	}
 
-	static async Task<int> ListGenresAsync()
+	static async Task<int> ListGenresAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
-		var setupClientResult = await SetupClientAsync();
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
 		if (setupClientResult != 0)
 		{
 			return setupClientResult;
@@ -306,11 +396,9 @@ class Program
 		return 1;
 	}
 	
-	
-	
-	static async Task<int> ListShowsAsync(string channel = "")
+	static async Task<int> ListShowsAsync(string globalOutputPath, int globalThreads, bool globalUseCache, string channel = "")
 	{
-		var setupClientResult = await SetupClientAsync();
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
 		if (setupClientResult != 0)
 		{
 			return setupClientResult;
@@ -333,7 +421,22 @@ class Program
 
 		return 1;
 	}
-	
+
+	static async Task<int> CrawlAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+		
+		var rtClientApiCrawler = new RTClientAPICrawler(_rtClient);
+		rtClientApiCrawler.StartAndWait();
+		
+		Log.Information("Crawl finished.");
+		
+		return 1;
+	}
 	
 	
 }

@@ -9,7 +9,7 @@ namespace RTArchiver.Data;
 public class SitemapIndex
 {
 	[XmlElement("sitemap")]
-	public Sitemap[] Sitemaps { get; set; }
+	public Sitemap[] Sitemaps { get; set; } = Array.Empty<Sitemap>();
 }
 
 
@@ -91,7 +91,7 @@ public class Sitemap
 public abstract class BaseSet<T>
 {
 	[XmlElement("url")]
-	public List<T> Urls { get; set; }
+	public List<T>? Urls { get; set; }
 }
 
 [XmlRoot("urlset", Namespace="http://www.sitemaps.org/schemas/sitemap/0.9")]
@@ -111,7 +111,7 @@ public class Url
 	[Unique]
 	[Column("guid")]
 	[XmlIgnore]
-	public byte[] Guid { get; set; }
+	public byte[] Guid { get; set; } = [];
 	
 	[PrimaryKey]
 	[Column("loc")]
@@ -138,7 +138,7 @@ public class VideoUrl : Url
 {
 	[Ignore]
 	[XmlElement("video", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-	public SiteMapVideo Video { get; set; }
+	public SiteMapVideo? Video { get; set; }
 
 	[XmlIgnore]
 	[Indexed]
@@ -155,7 +155,7 @@ public class SiteMapVideo
 	[Unique]
 	[Column("guid")]
 	[XmlIgnore]
-	public byte[] Guid { get; set; }
+	public byte[] Guid { get; set; } = Array.Empty<byte>();
 	
 	[XmlElement("thumbnail_loc")]
 	public string ThumbnailLocation { get; set; } = string.Empty;

@@ -20,7 +20,7 @@ public class Video
 	public Video_Attributes Attributes { get; set; } = new Video_Attributes();
 	
 	//[JsonPropertyName("included")]
-	//public Video_Included included { get; set; }
+	//public object Included { get; set; } = new object();
 }
 
 
@@ -105,6 +105,7 @@ public class Video_Attributes
 
 public class Video_Included
 {
-
+	[JsonPropertyName("images")]
+	public List<Image> Images { get; set; } = new List<Image>();
 }
 

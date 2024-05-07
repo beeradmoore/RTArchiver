@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace RTArchiver.Data
 {
-	public class Image
+	public class Image : IEquatable<Image>
 	{
 		[JsonPropertyName("attributes")]
 		public Image_Attributes Attributes { get; set; } = new Image_Attributes();
@@ -29,9 +29,48 @@ namespace RTArchiver.Data
 		[JsonPropertyName("uuid")]
 		public string Uuid { get; set; } = string.Empty;
 
+		public bool Equals(Image? other)
+		{
+			if (ReferenceEquals(null, other))
+			{
+				return false;
+			}
+
+			if (ReferenceEquals(this, other))
+			{
+				return true;
+			}
+
+			return Attributes.Equals(other.Attributes) && Id == other.Id && Type == other.Type && Uuid == other.Uuid;
+		}
+
+		public override bool Equals(object? obj)
+		{
+			if (ReferenceEquals(null, obj))
+			{
+				return false;
+			}
+
+			if (ReferenceEquals(this, obj))
+			{
+				return true;
+			}
+
+			if (obj.GetType() != this.GetType())
+			{
+				return false;
+			}
+
+			return Equals((Image)obj);
+		}
+
+		public override int GetHashCode()
+		{
+			return HashCode.Combine(Attributes, Id, Type, Uuid);
+		}
 	}
 
-	public class Image_Attributes
+	public class Image_Attributes : IEquatable<Image_Attributes>
 	{
 		[JsonPropertyName("image_type")]
 		public string ImageType { get; set; } = string.Empty;
@@ -50,5 +89,45 @@ namespace RTArchiver.Data
 
 		[JsonPropertyName("thumb")]
 		public string Thumb { get; set; } = string.Empty;
+
+		public bool Equals(Image_Attributes? other)
+		{
+			if (ReferenceEquals(null, other))
+			{
+				return false;
+			}
+
+			if (ReferenceEquals(this, other))
+			{
+				return true;
+			}
+
+			return ImageType == other.ImageType && Large == other.Large && Medium == other.Medium && Orientation == other.Orientation && Small == other.Small && Thumb == other.Thumb;
+		}
+
+		public override bool Equals(object? obj)
+		{
+			if (ReferenceEquals(null, obj))
+			{
+				return false;
+			}
+
+			if (ReferenceEquals(this, obj))
+			{
+				return true;
+			}
+
+			if (obj.GetType() != this.GetType())
+			{
+				return false;
+			}
+
+			return Equals((Image_Attributes)obj);
+		}
+
+		public override int GetHashCode()
+		{
+			return HashCode.Combine(ImageType, Large, Medium, Orientation, Small, Thumb);
+		}
 	}
 }

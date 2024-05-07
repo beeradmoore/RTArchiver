@@ -1,13 +1,11 @@
-using System.Collections.Concurrent;
-using System.Collections.Frozen;
-using System.Collections.Specialized;
-using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Reflection.Metadata;
+using System.Runtime.InteropServices.JavaScript;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Web;
 using System.Xml.Serialization;
 using RTArchiver.Data;
@@ -16,7 +14,6 @@ using RTArchiver.Data.Responses;
 using RTArchiver.Extensions;
 using RunProcessAsTask;
 using Serilog;
-using Serilog.Core;
 using SQLite;
 
 namespace RTArchiver;
@@ -34,6 +31,7 @@ public class RTClient
 	
 	public RTClient()
 	{
+		_httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15");
 		_httpClient.DefaultRequestHeaders.Add("client-id", "4338d2b4bdc8db1239360f28e72f0d9ddb1fd01e7a38fbb07b4b1f4ba4564cc5");
 		_httpClient.DefaultRequestHeaders.Add("client-type", "web");
 		_httpClient.BaseAddress = new Uri("https://svod-be.roosterteeth.com");
@@ -142,7 +140,7 @@ public class RTClient
 	}
 
 	object _diskIOLock = new object();
-	async Task<TResponse?> GetAPIRequest<TResponse>(string endpoint, int page = 1, bool useAuth = true)
+	async Task<(bool Success, int StatusCode, TResponse? Response)> GetAPIRequest<TResponse>(string endpoint, int page = 1, bool useAuth = true, CancellationToken cancellationToken = default(CancellationToken))
 	{
 		var guid = Guid.NewGuid().ToString("D");
 		var stopwatch = new Stopwatch();
@@ -151,7 +149,9 @@ public class RTClient
 		
 		if (endpoint.StartsWith("http"))
 		{
+			Log.Error($"GetAPIRequest called with endpoint starting with http, {endpoint}");
 			Debugger.Break();
+			return (false, 0, default(TResponse));
 		}
 			
 		//endpoint += "/sda/213odfs?gfda=dai9&thing=that&tha=dsa";
@@ -216,24 +216,30 @@ public class RTClient
 		Log.Verbose($"modifiedQueryArguments: {modifiedQueryArguments}");
 		
 	
-		/*
-		if (cacheFileExists)
+		
+		if (UseCache)
 		{
-			try
+			if (cacheFileExists)
 			{
-				using (var fileStream = File.OpenRead(fullCacheFileName))
+				try
 				{
-					return JsonSerializer.Deserialize<TResponse>(fileStream);
+					using (var fileStream = File.OpenRead(fullCacheFileName))
+					{
+						var tResponse = JsonSerializer.Deserialize<TResponse>(fileStream);
+						if (tResponse != null)
+						{
+							return (true, 200, tResponse);
+						}
+					}
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Could not load request from disk, {fullCacheFileName}");
 				}
 			}
-			catch (Exception err)
-			{
-				Log.Error(err, $"Could not load request from disk, {fullCacheFileName}");
-				Console.WriteLine($"Error: Could not load request from disk, {fullCacheFileName}");
-				Console.WriteLine(err.Message);
-			}
+
+			return (false, 0, default(TResponse));
 		}
-		*/
 		
 		var modifiedEndpointWithQuery = (string.IsNullOrWhiteSpace(modifiedQueryArguments) ? modifiedEndpoint : $"{modifiedEndpoint}?{modifiedQueryArguments}");
 		Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before request");
@@ -261,10 +267,8 @@ public class RTClient
 			
 			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before send async");
 
-			var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+			var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - after send async");
-
-			// TODO: GET ETAG HERE
 			
 			if (response.StatusCode == HttpStatusCode.NotModified)
 			{
@@ -284,7 +288,7 @@ public class RTClient
 						}
 						Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - loaded from cache");
 
-						return cachedResponseObject;
+						return (true, (int)response.StatusCode, cachedResponseObject);
 					}
 				}
 				catch (Exception err)
@@ -299,20 +303,27 @@ public class RTClient
 			else if (response.StatusCode == HttpStatusCode.NotFound)
 			{
 				Log.Error($"{guid} GetAPIRequest: response code 404 - {endpoint}");
-				return default(TResponse);
+				return (false, (int)response.StatusCode, default(TResponse));
+			}
+			else if (response.StatusCode == HttpStatusCode.Unauthorized)
+			{
+				Log.Error($"{guid} GetAPIRequest: response code 401 - {endpoint}");
+				return (false, (int)response.StatusCode, default(TResponse));
 			}
 			else if (response.StatusCode != HttpStatusCode.OK)
 			{
+				Log.Error($"{guid} GetAPIRequest: response code {((int)response.StatusCode)} - {endpoint}");
 				Debugger.Break();
+				return (false, (int)response.StatusCode, default(TResponse));
 			}
 			
 			Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - start download");
 
 			using (var memoryStream = new MemoryStream())
 			{
-				using (var responseStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+				using (var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
 				{
-					await responseStream.CopyToAsync(memoryStream).ConfigureAwait(false);
+					await responseStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
 				}
 
 				memoryStream.Position = 0;
@@ -323,21 +334,15 @@ public class RTClient
 				{
 					lock (_diskIOLock)
 					{
-						Directory.CreateDirectory(fullCacheDirectory);
-						
-						/*
-						var cacheDirectoryExists = Directory.Exists(fullCacheDirectory);
-
-						if (cacheDirectoryExists == false)
+						if (Directory.Exists(fullCacheDirectory) == false)
 						{
 							Directory.CreateDirectory(fullCacheDirectory);
 						}
-						*/
 					}
 
 					using (var fileStream = File.Create(fullCacheFileName))
 					{
-						await memoryStream.CopyToAsync(fileStream);
+						await memoryStream.CopyToAsync(fileStream).ConfigureAwait(false);
 					}
 					
 					if (response.Headers.ETag != null)
@@ -369,12 +374,17 @@ public class RTClient
 				memoryStream.Position = 0;
 				try
 				{
-					return await JsonSerializer.DeserializeAsync<TResponse>(memoryStream);
+					var responseObject = await JsonSerializer.DeserializeAsync<TResponse>(memoryStream);
+					return (true, (int)response.StatusCode, responseObject);
+				}
+				catch (TaskCanceledException err) when (err.CancellationToken == cancellationToken)
+				{
+					return (false, 0, default(TResponse));
 				}
 				catch (Exception err)
 				{
 					Log.Error(err, $"Could not deserialize json for {endpoint}.");
-					return default(TResponse);
+					return (false, (int)response.StatusCode, default(TResponse));
 				}
 				finally
 				{
@@ -384,13 +394,14 @@ public class RTClient
 		}
 	}
 	
-	internal async Task<(bool Success, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string endpoint) where TResponse : BaseResponse<T>
+	internal async Task<(bool Success, int Pages, int LastStatusCode, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string endpoint, CancellationToken cancellationToken = default(CancellationToken)) where TResponse : BaseResponse<T>
 	{
 		// No http requests should be coming here
 		if (endpoint.StartsWith("http", StringComparison.OrdinalIgnoreCase))
 		{
+			Log.Error($"GetPaginatedAPIRequest called with endpoint starting with http, {endpoint}");
 			Debugger.Break();
-			return (true, new List<T>());
+			return (false, 0, 0, new List<T>());
 		}
 
 		Log.Information($"GetPaginatedAPIRequest: {endpoint}");
@@ -400,19 +411,36 @@ public class RTClient
 		
 		var items = new List<T>();
 		var currentPage = 1;
-		
-		TResponse? response = null;
+
+		(bool Success, int StatusCode, TResponse? Response) apiResponse = (false, 0, null);
 		do
 		{
 			try
 			{
-				response = await GetAPIRequest<TResponse>(endpoint, page: currentPage).ConfigureAwait(false);
-				if (response == null)
+				apiResponse = await GetAPIRequest<TResponse>(endpoint, page: currentPage, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+				if (cancellationToken.IsCancellationRequested)
 				{
-					throw new Exception("Response object was null");
+					return (false, 0, 0, new List<T>());
 				}
 				
-				items.AddRange(response.Data);
+				if (apiResponse.Success)
+				{
+					if (apiResponse.Response is not null)
+					{
+						items.AddRange(apiResponse.Response.Data);
+					}
+					else
+					{
+						throw new Exception("Response was success, but response object was null");
+					}
+				}
+				else
+				{
+					Log.Error($"GetPaginatedAPIRequest: Invalid status code, {apiResponse.StatusCode}");
+					return (false, currentPage, apiResponse.StatusCode, items);
+				}
+				
 				++currentPage;
 			}
 			catch (Exception err)
@@ -425,15 +453,15 @@ public class RTClient
 			}
 			
 			// Sometimes TotalPages is incorrect, and sometimes TotalResults is incorrect so we have to check both and hope for the best -_-
-		} while (retries < maxRetries && currentPage <= response?.TotalPages && items.Count < response?.TotalResults);
+		} while (retries < maxRetries && currentPage <= apiResponse.Response?.TotalPages && items.Count < apiResponse.Response?.TotalResults);
 
 		if (retries > maxRetries)
 		{
 			Log.Error($"Could not get all pages for url {endpoint}");
-			return (false, new List<T>());
+			return (false, currentPage, 0, new List<T>());
 		}
 		
-		return (true, items);
+		return (true, currentPage, 200, items);
 	}
 
 	public async Task<MeResponse?> GetMe(bool hasJustRefreshed = false)
@@ -634,9 +662,10 @@ public class RTClient
 	}
 	
 
+	/*
 	public async Task<List<Season>> GetSeasons(string showSlug)
 	{
-		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>($"https://svod-be.roosterteeth.com/api/v1/shows/{showSlug}/seasons");
+		var response = await GetPaginatedAPIRequest<Season, SeasonsResponse>($"/api/v1/shows/{showSlug}/seasons");
 		if (response.Success)
 		{
 			return response.Items;
@@ -851,23 +880,7 @@ public class RTClient
 		}
 		return downloadItems;
 	}
-	
-	
-	// TODO: Handle these APIs, set useAuth when its not required 
-	// https://svod-be.roosterteeth.com/api/v1/channels (noauth)
-	// https://svod-be.roosterteeth.com/api/v1/shows?per_page=50&order=desc&page=1
-
-	// Other samples
-	// https://svod-be.roosterteeth.com/api/v1/shows/camp-camp
-	// Some of these have bonus features in it as well, we should expose those.
-	// https://roosterteeth.com/episodes?channel_id=red-vs-blue-universe
-	// https://roosterteeth.com/watch/red-vs-blue-season-4-episode-58
-
-	public async Task CacheGoBrrrr()
-	{
-		var rtClientApiCrawler = new RTClientAPICrawler(this);
-		await rtClientApiCrawler.StartAsync();
-	}
+	*/
 
 	public async Task DownloadSitemapsAsync()
 	{
@@ -898,7 +911,7 @@ public class RTClient
 		using (StreamReader reader = new StreamReader(rootSitemap))
 		{
 			var serializer = new XmlSerializer(typeof(SitemapIndex));
-			sitemapIndex = (SitemapIndex)serializer.Deserialize(reader);
+			sitemapIndex = serializer.Deserialize(reader) as SitemapIndex;
 		}
 
 		if (sitemapIndex is null)
@@ -943,7 +956,7 @@ public class RTClient
 				using (StreamReader reader = new StreamReader(sitemapPath))
 				{
 					var serializer = new XmlSerializer(typeof(StaticPageSet));
-					staticPageSet = (StaticPageSet)serializer.Deserialize(reader);
+					staticPageSet = serializer.Deserialize(reader) as StaticPageSet;
 				}
 
 				if (staticPageSet is null)
@@ -953,29 +966,32 @@ public class RTClient
 					return;
 				}
 
-				Log.Information($"{sitemap.Tag} - Found {staticPageSet.Urls.Count} items");
+				Log.Information($"{sitemap.Tag} - Found {staticPageSet.Urls?.Count} items");
 
-				var dbStaticPages = sitemapSqliteConnection.Table<StaticPage>().ToList();
-				lock (transactionLock)
+				if (staticPageSet.Urls?.Any() == true)
 				{
-					sitemapSqliteConnection.BeginTransaction();
-					foreach (var staticPage in staticPageSet.Urls)
+					var dbStaticPages = sitemapSqliteConnection.Table<StaticPage>().ToList();
+					lock (transactionLock)
 					{
-						var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
-
-						if (dbStaticPage is null)
+						sitemapSqliteConnection.BeginTransaction();
+						foreach (var staticPage in staticPageSet.Urls)
 						{
-							staticPage.Guid = Guid.NewGuid().ToByteArray();
-						}
-						else
-						{
-							staticPage.Guid = dbStaticPage.Guid;
+							var dbStaticPage = dbStaticPages.SingleOrDefault(x => x.Location.Equals(staticPage.Location, StringComparison.OrdinalIgnoreCase));
+
+							if (dbStaticPage is null)
+							{
+								staticPage.Guid = Guid.NewGuid().ToByteArray();
+							}
+							else
+							{
+								staticPage.Guid = dbStaticPage.Guid;
+							}
+
+							sitemapSqliteConnection.InsertOrReplace(staticPage);
 						}
 
-						sitemapSqliteConnection.InsertOrReplace(staticPage);
+						sitemapSqliteConnection.Commit();
 					}
-
-					sitemapSqliteConnection.Commit();
 				}
 			}
 			else if (sitemap.Tag == "rooster-teeth" ||
@@ -999,7 +1015,7 @@ public class RTClient
 				using (StreamReader reader = new StreamReader(sitemapPath))
 				{
 					var serializer = new XmlSerializer(typeof(VideoSet));
-					videoSet = (VideoSet)serializer.Deserialize(reader);
+					videoSet = serializer.Deserialize(reader) as VideoSet;
 				}
 
 				//var video = videoSet.Urls.First();
@@ -1011,34 +1027,40 @@ public class RTClient
 					return;
 				}
 
-				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls.Count} items");
+				Log.Information($"{sitemap.Tag} - Found {videoSet.Urls?.Count} items");
 
-				var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
-
-				lock (transactionLock)
+				if (videoSet.Urls?.Any() == true)
 				{
-					sitemapSqliteConnection.BeginTransaction();
-					foreach (var videoUrl in videoSet.Urls)
+					var dbVideoUrls = sitemapSqliteConnection.Table<VideoUrl>().ToList();
+
+					lock (transactionLock)
 					{
-						videoUrl.SitemapId = sitemap.Id;
-						videoUrl.SitemapTag = sitemap.Tag;
-						var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
-						if (dbVideoUrl is null)
+						sitemapSqliteConnection.BeginTransaction();
+						foreach (var videoUrl in videoSet.Urls)
 						{
-							videoUrl.Guid = Guid.NewGuid().ToByteArray();
-						}
-						else
-						{
-							videoUrl.Guid = dbVideoUrl.Guid;
+							videoUrl.SitemapId = sitemap.Id;
+							videoUrl.SitemapTag = sitemap.Tag;
+							var dbVideoUrl = dbVideoUrls.SingleOrDefault(x => x.Location.Equals(videoUrl.Location, StringComparison.OrdinalIgnoreCase));
+							if (dbVideoUrl is null)
+							{
+								videoUrl.Guid = Guid.NewGuid().ToByteArray();
+							}
+							else
+							{
+								videoUrl.Guid = dbVideoUrl.Guid;
+							}
+
+							sitemapSqliteConnection.InsertOrReplace(videoUrl);
+
+							if (videoUrl.Video is not null)
+							{
+								videoUrl.Video.Guid = videoUrl.Guid;
+								sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+							}
 						}
 
-						sitemapSqliteConnection.InsertOrReplace(videoUrl);
-
-						videoUrl.Video.Guid = videoUrl.Guid;
-						sitemapSqliteConnection.InsertOrReplace(videoUrl.Video);
+						sitemapSqliteConnection.Commit();
 					}
-
-					sitemapSqliteConnection.Commit();
 				}
 			}
 			else
@@ -1089,17 +1111,488 @@ public class RTClient
 		}
 	}
 
+
+	public async Task DownloadImagesAsync()
+	{
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "*.json", SearchOption.AllDirectories);
+
+		var parallelOptions = new ParallelOptions()
+		{
+			#if DEBUG
+			MaxDegreeOfParallelism = 1,
+			#else
+			MaxDegreeOfParallelism = NumberOfThreads,
+			#endif
+		};
+
+		var channels = await GetChannels();
+		var shows = await GetShows();
+		
+		channels.Sort();
+		shows.Sort();
+
+		foreach (var channel in channels)
+		{
+			var channelDirectory = Path.Combine(Storage.ImagesPath, channel.Slug);
+			if (Directory.Exists(channelDirectory) == false)
+			{
+				Directory.CreateDirectory(channelDirectory);
+			}
+		}
+
+		foreach (var show in shows)
+		{
+			#if DEBUG
+			var channelDirectory = Path.Combine(Storage.ImagesPath, show.Attributes.ChannelSlug);
+			if (Directory.Exists(channelDirectory) == false)
+			{
+				// We should never get here. If we do it means the channel is not in the channels list.
+				Debugger.Break();
+			}
+			#endif
+			
+			var showDirectory = Path.Combine(Storage.ImagesPath, show.Attributes.ChannelSlug, show.Slug);
+			if (Directory.Exists(showDirectory) == false)
+			{
+				Directory.CreateDirectory(showDirectory);
+			}
+		}
+		
+		
+		async Task DownloadImageAsync(int imageId, string seasonPath, string imageFileNameBase, string imageType, string url)
+		{
+			if (string.IsNullOrEmpty(url))
+			{
+				Log.Error($"No url for image {imageId} {imageType}");
+				return;
+			}
+			//var imageFileName = $"{image.Type}_{image.Attributes.ImageType}_{image.Attributes.Orientation}_({image.Id})";
+
+			var extension = Path.GetExtension(url).ToLower(CultureInfo.InvariantCulture);
+			var imageFileName = $"{imageFileNameBase}_{imageType}_({imageId}){extension}";
+			var tempFileName = Guid.NewGuid().ToString("D") + extension;
+			//await DownloadImageAsync(image.Id, seasonDirectory, imageFileName, "small", image.Attributes.Small).ConfigureAwait(false);
+			var tempPath = Path.Combine(Storage.TempPath, tempFileName);
+			var finalPath = Path.Combine(seasonPath, imageFileName);
+
+			if (File.Exists(finalPath))
+			{
+				return;
+			}
+			
+			Log.Information($"Downloading {imageId} - {url}");
+
+			try
+			{
+				using (var response = await _httpClient.GetStreamAsync(url))
+				{
+					using (var imageStream = File.Create(tempPath))
+					{
+						await response.CopyToAsync(imageStream).ConfigureAwait(false);
+					}
+				}
+
+				var fileInfo = new FileInfo(tempPath);
+				if (fileInfo.Length == 0)
+				{
+					throw new Exception("File length is 0");
+				}
+				
+				// TODO: Probably should check if the image can be loaded.
+
+				File.Move(tempPath, finalPath);
+			}
+			catch (HttpRequestException err) when (err.StatusCode == HttpStatusCode.NotFound)
+			{
+				// NOOP
+				Log.Error($"Image is 404, season: {seasonPath}, url: {url}");
+				Debugger.Break();
+			}
+			catch (Exception err)
+			{
+				Log.Error(err, $"Could not download image {url}");
+			}
+		}
+
+		
+		var directoryLock = new object();
+		
+		var knownExtensions = new List<string>() { ".jpg", ".jpeg", ".png", ".gif", ".jp2", ".webp" };
+		
+		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
+		{
+			if (Path.GetFileName(jsonFile) == "videos_page-1.json")
+			{
+				return;
+			}
+			
+			//Log.Information($"Reading: {jsonFile}");
+			//var fileData = File.ReadAllText(jsonFile);
+			using (var fileStream = File.OpenRead(jsonFile))
+			{
+				var episodesResponse = await JsonSerializer.DeserializeAsync<EpisodesResponse>(fileStream, cancellationToken: state);
+
+				if (episodesResponse is null)
+				{
+					Log.Error($"episodesResponse was null");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Data.Count == 0)
+				{
+					Log.Error($"Zero episodes found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+		
+
+				if (episodesResponse.Data.Count > 1)
+				{
+					Log.Error($"More than 1 episodes found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Data[0].Type != "episode" && episodesResponse.Data[0].Type != "bonus_feature")
+				{
+					Log.Error($"Error: Invalid data type found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+				
+				
+
+				
+				Episode episode = episodesResponse.Data[0];
+
+				/*
+				if (episode.Type != "bonus_feature")
+				{
+					return;
+				}
+				*/
+				
+
+				/*
+				#if DEBUG
+				if (episode.Attributes.SeasonNumber >= 9999)
+				{
+					Debugger.Break();
+				}
+
+
+				if (episode.Attributes.SeasonNumber <= 0 && episode.Type != "bonus_feature")
+				{
+					//0782ac10-b6ad-48bb-8a2f-7214e686bed6 kinda funny brave
+					// 1b2ff64c-8d0b-4eab-8832-36f6f8f9af0f
+					//Debugger.Break();
+				}
+				#endif
+				*/
+
+				var showDirectory = Path.Combine(Storage.ImagesPath, episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug);
+
+				
+				BonusFeature? bonusFeature = null;
+				if (episode.Type == "bonus_feature")
+				{
+					fileStream.Position = 0;
+					var bonusFeatureResponse = await JsonSerializer.DeserializeAsync<BonusFeaturesResponse>(fileStream, cancellationToken: state);
+				
+					if (bonusFeatureResponse is null)
+					{
+						Log.Error($"bonusFeatureResponse was null");
+						Debugger.Break();
+						return;
+					}
+
+					if (bonusFeatureResponse.Data.Count == 0)
+					{
+						Log.Error($"Zero bonus_feature found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+	
+					if (bonusFeatureResponse.Data.Count > 1)
+					{
+						Log.Error($"More than 1 bonus_feature found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+
+					if (bonusFeatureResponse.Data[0].Type != "bonus_feature")
+					{
+						Log.Error($"Error: Invalid data type found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+
+					bonusFeature = bonusFeatureResponse.Data[0];
+					showDirectory = Path.Combine(Storage.ImagesPath, bonusFeature.Attributes.ChannelSlug, bonusFeature.Attributes.ParentContentSlug);
+				}
+				
+		
+				if (Directory.Exists(showDirectory) == false)
+				{
+					lock (directoryLock)
+					{
+						Directory.CreateDirectory(showDirectory);
+
+					}
+
+					/*
+					if (showDirectory.EndsWith("/inside-gaming/inside-gaming-daily") == false &&
+					    showDirectory.EndsWith("/inside-gaming/inside-gaming-podcast") == false &&
+						showDirectory.EndsWith("/inside-gaming/inside-gaming-reviews") == false &&
+						showDirectory.EndsWith("/inside-gaming/inside-gaming-features") == false &&
+						showDirectory.EndsWith("/inside-gaming/inside-gaming-explains") == false &&
+						showDirectory.EndsWith("/inside-gaming/inside-gaming-live") == false &&
+						showDirectory.EndsWith("/inside-gaming/inside-gaming-special")) == false)
+					{
+						// We should never get here. If we do it means the show is not in the shows list.
+						Debugger.Break();
+					}
+					*/
+				}
+				
+				//var imageFileNames = new List<string>();
+				foreach (var image in episode.Included.Images)
+				{
+					var downloadDirectory = string.Empty;
+
+					if (image.Type == "show_image")
+					{
+						downloadDirectory = Path.Combine(showDirectory);
+					}
+					else if (episode.Type == "episode")
+					{ 
+						downloadDirectory = Path.Combine(showDirectory, episode.Attributes.SeasonSlug, episode.Attributes.Slug);
+					}
+					else if (episode.Type == "bonus_feature" && bonusFeature is not null)
+					{
+						downloadDirectory = Path.Combine(showDirectory, "bonus_feature", episode.Attributes.Slug);
+						//Debugger.Break();
+					}
+
+					if (string.IsNullOrEmpty(downloadDirectory))
+					{
+						Log.Error($"Could not determine image download directory for {jsonFile}");
+					}
+
+					lock (directoryLock)
+					{
+						if (Directory.Exists(downloadDirectory) == false)
+						{
+							lock (directoryLock)
+							{
+								Directory.CreateDirectory(downloadDirectory);
+							}
+						}
+					}
+
+					/*
+					var sExtension = Path.GetExtension(image.Attributes.Small).ToLower(CultureInfo.InvariantCulture);
+					var mExtension = Path.GetExtension(image.Attributes.Medium).ToLower(CultureInfo.InvariantCulture);
+					var lExtension = Path.GetExtension(image.Attributes.Large).ToLower(CultureInfo.InvariantCulture);
+					var tExtension = Path.GetExtension(image.Attributes.Thumb).ToLower(CultureInfo.InvariantCulture);
+
+					if (knownExtensions.Contains(sExtension) == false ||
+					    knownExtensions.Contains(mExtension) == false ||
+					    knownExtensions.Contains(lExtension) == false ||
+					    knownExtensions.Contains(tExtension) == false
+					   )
+					{
+						Log.Error("Unknown extension found");
+						Debugger.Break();
+					}
+					*/
+
+					var imageFileName = $"{image.Type}_{image.Attributes.ImageType}_{image.Attributes.Orientation}";
+					//var imageFileName = $"{image.Type}_{image.Attributes.ImageType}_{image.Attributes.Orientation}_({image.Id})";
+					/*
+					if (imageFileNames.Contains(imageFileName))
+					{
+						Log.Error("ImageFileName exists");
+						Debugger.Break();
+					}
+					else
+					{
+						imageFileNames.Add(imageFileName);
+					}
+					*/
+
+					await Task.WhenAll(
+						DownloadImageAsync(image.Id, downloadDirectory, imageFileName, "small", image.Attributes.Small),
+						DownloadImageAsync(image.Id, downloadDirectory, imageFileName, "medium", image.Attributes.Medium),
+						DownloadImageAsync(image.Id, downloadDirectory, imageFileName, "large", image.Attributes.Large),
+						DownloadImageAsync(image.Id, downloadDirectory, imageFileName, "thumb", image.Attributes.Thumb)
+					);
+				}
+			}
+			
+			
+			//Debugger.Break();
+		});
+		
+		Debugger.Break();
+		
+	}
+
+	Regex cleanFileNameRegex = new Regex("([^a-zA-Z0-9# .])");
+	
+	string CreateCleanFileName(string input)
+	{
+		var match = cleanFileNameRegex.Match(input);
+		if (match.Success == false)
+		{
+			return input;
+		}
+
+		return input;
+	}
+
+	public async Task PlaygroundAsync()
+	{
+		var channels = await GetChannels();
+		var shows = await GetShows();
+
+		//x-ray-and-vav"
+
+		channels.Sort();
+
+		Show? show = null;
+		
+		foreach (var channel in channels)
+		{
+			//CreateCleanFileName(channel.Name);
+
+			Log.Information($"{channel.Name}");
+			var tempShows = new List<Show>();
+
+			foreach (var tempShow in shows)
+			{
+				if (tempShow.Slug == "x-ray-and-vav")
+				{
+					show = tempShow;
+					break;
+				}
+			}
+
+			if (show is not null)
+			{
+				break;
+			}
+			/*
+			tempShows.Sort();
+
+			foreach (var show in tempShows)
+			{
+				CreateCleanFileName(show.Title);
+
+				Log.Information($" - {show.Title}");
+			}
+			*/
+			
+
+			//Log.Information("\n");
+
+
+		}
+		
+		if (show == null)
+		{
+			return;
+		}
+
+		var channelPath = Path.Combine("/Volumes/Storage/plex_playground/data", show.Attributes.ChannelSlug);
+		if (Directory.Exists(channelPath) == false)
+		{
+			Directory.CreateDirectory(channelPath);
+		}
+
+		var showPath = Path.Combine(channelPath, show.Slug);
+		if (Directory.Exists(showPath) == false)
+		{
+			Directory.CreateDirectory(showPath);
+		}
+
+		if (string.IsNullOrEmpty(show.Links.BonusFeatures) == false)
+		{
+			var bonusFeaturesResponse = await GetPaginatedAPIRequest<BonusFeature, BonusFeaturesResponse>(show.Links.BonusFeatures);
+			if (bonusFeaturesResponse.Success)
+			{
+				var specialsPath = Path.Combine(showPath, "Specials");
+				if (Directory.Exists(specialsPath) == false)
+				{
+					Directory.CreateDirectory(specialsPath);
+				}
+
+				foreach (var bonusFeature in bonusFeaturesResponse.Items)
+				{
+					var title = bonusFeature.Attributes.Title;
+					var summary = bonusFeature.Attributes.Description;
+					var slug = bonusFeature.Attributes.Slug;
+
+					var goLiveAt = DateTime.Parse(bonusFeature.Attributes.MemberGoLiveAt);
+					var goLiveAtString = TimeZoneInfo.ConvertTime(goLiveAt, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago")); 
+
+					var videoResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
+					if (videoResponse.Success == false || videoResponse.Response is null || videoResponse.Response?.Data.Count != 1)
+					{
+						Debugger.Break();
+						continue;
+					}
+					
+					var video = videoResponse.Response.Data[0];
+					//x-ray-and-vav-bonus-3
+					var bonusFeatureOutput = Path.Combine(specialsPath, $"{bonusFeature.Attributes.SortNumber:0000}-{bonusFeature.Attributes.Slug}-({video.Id})");
+
+					
+					Debugger.Break();
+
+				
+				}
+				
+				
+
+
+			}
+
+
+		}
+		// /api/v1/shows/x-ray-and-vav/bonus_features
+		// /api/v1/shows/x-ray-and-vav/seasons?order=asc&order_by=number
+		
+		Debugger.Break();
+		
+
+		/*
+
+	var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "*.json", SearchOption.AllDirectories);
+
+	var parallelOptions = new ParallelOptions()
+	{
+		MaxDegreeOfParallelism = NumberOfThreads,
+	};
+
+	var dictionaryLock = new object();
+	*/
+
+
+		//{channel}/{Show}/{S##}/YYYY-MM-DD-{RTid}/YYYY-MM-DD-{First}{S##E##} Title {RTid}.ext
+
+	}
+
+	/*
 	public async Task DownloadAllAsync()
 	{
 		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_*.json", SearchOption.AllDirectories);
 
-		/*
-		List<string> episodes = new List<string>();
-		List<string> bonusFeatures = new List<string>();
-		*/
+
 		List<string> videos = new List<string>();
-		
-		
+
+
 		var ids = new Dictionary<long, int>(jsonFiles.Length);
 		var contentName = new Dictionary<string, int>(jsonFiles.Length);
 
@@ -1107,12 +1600,12 @@ public class RTClient
 
 
 		var dictionaryLock = new object();
-		
+
 		var parallelOptions = new ParallelOptions()
 		{
 			MaxDegreeOfParallelism = 4,
 		};
-		
+
 
 		var tempPath = Path.Combine(Storage.TempPath, "rt-archiver");
 		if (Directory.Exists(tempPath))
@@ -1143,7 +1636,7 @@ public class RTClient
 					Log.Error($"Error: Zero videos found - {jsonFile}");
 					return;
 				}
-		
+
 
 				if (videosResponse.Data.Count > 1)
 				{
@@ -1161,19 +1654,19 @@ public class RTClient
 					Debugger.Break();
 					return;
 				}
-				
+
 				var id = videosResponse.Data[0].Id;
-				
+
 				try
 				{
-					
-					
+
+
 					var downloadUrl = videosResponse.Data[0].Links?.Download ?? string.Empty;
 					if (string.IsNullOrEmpty(downloadUrl))
 					{
 						Debugger.Break();
 					}
-					
+
 					var outputFile = $"{id}.mkv";
 					var tempOutputPath = Path.Combine(tempPath, outputFile);
 					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
@@ -1202,7 +1695,7 @@ public class RTClient
 				}
 
 				return;
-				
+
 				/*
 				 episode
 				else if (videosResponse.Data[0].Type == "bonus_feature")
@@ -1219,6 +1712,7 @@ public class RTClient
 				}
 				*/
 
+				/*
 				var content = videosResponse.Data[0].Links?.Content ?? string.Empty;
 				if (string.IsNullOrEmpty(content))
 				{
@@ -1245,11 +1739,12 @@ public class RTClient
 					Console.WriteLine(err);
 					Debugger.Break();
 				}
-		
+				*/
+		/*
 			}
 		});
 		
-		
+		*/
 		/*
 		var frozenDictionary = contentName.ToFrozenDictionary();
 		var idKeys = frozenDictionary.Keys.ToList();
@@ -1274,6 +1769,6 @@ public class RTClient
 
 				}
 			}
-		}*/
-	}
+		}
+	}*/
 }
