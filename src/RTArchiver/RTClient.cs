@@ -21,7 +21,10 @@ namespace RTArchiver;
 public class RTClient
 {
 	readonly HttpClient _httpClient = new HttpClient();
+	public HttpClient HttpClient => _httpClient;
+	
 	AuthResponse? _authResponse;
+	public AuthResponse? AuthResponse => _authResponse;
 
 	public SQLiteConnection CacheSQLiteConnection { get; init; }
 
@@ -46,6 +49,9 @@ public class RTClient
 			SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
 
 		CacheSQLiteConnection.CreateTable<CacheItem>();
+		CacheSQLiteConnection.CreateTable<CommentCacheItem>();
+		
+		
 	}
 
 
@@ -140,6 +146,7 @@ public class RTClient
 	}
 
 	object _diskIOLock = new object();
+	
 	async Task<(bool Success, int StatusCode, TResponse? Response)> GetAPIRequest<TResponse>(string endpoint, int page = 1, bool useAuth = true, CancellationToken cancellationToken = default(CancellationToken))
 	{
 		var guid = Guid.NewGuid().ToString("D");
@@ -394,6 +401,7 @@ public class RTClient
 		}
 	}
 	
+	
 	internal async Task<(bool Success, int Pages, int LastStatusCode, List<T> Items)> GetPaginatedAPIRequest<T, TResponse>(string endpoint, CancellationToken cancellationToken = default(CancellationToken)) where TResponse : BaseResponse<T>
 	{
 		// No http requests should be coming here
@@ -463,7 +471,7 @@ public class RTClient
 		
 		return (true, currentPage, 200, items);
 	}
-
+	
 	public async Task<MeResponse?> GetMe(bool hasJustRefreshed = false)
 	{
 		var url2 = "https://business-service.roosterteeth.com/api/v1/me";
@@ -1110,18 +1118,7 @@ public class RTClient
 			return string.Empty;
 		}
 	}
-
-	public async Task DownloadCommentsAsync()
-	{
-		// TODO
-		await Task.Delay(1);
-	}
 	
-	public async Task DownloadUsersAsync()
-	{
-		// TODO
-		await Task.Delay(1);
-	}
 
 	public async Task DownloadBadgesAsync()
 	{

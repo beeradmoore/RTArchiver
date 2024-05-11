@@ -333,8 +333,11 @@ class Program
 			return setupClientResult;
 		}
 
-		await _rtClient.DownloadCommentsAsync();
-		await _rtClient.DownloadUsersAsync();
+		var rtClientCommentsCrawler = new RTClientCommentsCrawler(_rtClient);
+		await rtClientCommentsCrawler.StartAndWaitAsync();
+
+		var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
+		await rtClientUsersCrawler.StartAndWaitAsync();
 
 		return 0;
 	}
@@ -347,7 +350,8 @@ class Program
 			return setupClientResult;
 		}
 
-		await _rtClient.DownloadUsersAsync();
+		var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
+		await rtClientUsersCrawler.StartAndWaitAsync();
 
 		return 0;
 	}
