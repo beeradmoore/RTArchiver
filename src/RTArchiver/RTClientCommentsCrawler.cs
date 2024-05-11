@@ -226,9 +226,11 @@ public class RTClientCommentsCrawler
 			{
 				if (comment.ChildCommentsTotalCount > 0)
 				{
-					await GetHttpPaginatedAPIRequest<Comment, CommentsResponse>($"https://comments.roosterteeth.com/api/v2/comments/{comment.Uuid}/thread", Path.Combine(episodeUuid, comment.Uuid), cancellationToken).ConfigureAwait(false);
-					Log.Error($"Invalid status code {response.LastStatusCode} for thread {comment.Uuid}");
-
+					var threadResponse = await GetHttpPaginatedAPIRequest<Comment, CommentsResponse>($"https://comments.roosterteeth.com/api/v2/comments/{comment.Uuid}/thread", Path.Combine(episodeUuid, comment.Uuid), cancellationToken).ConfigureAwait(false);
+					if (threadResponse.Success == false)
+					{
+						Log.Error($"Invalid status code {threadResponse.LastStatusCode} for thread {comment.Uuid}");
+					}
 				}
 			}
 		}
@@ -424,7 +426,6 @@ public class RTClientCommentsCrawler
 				request.Headers.Add("If-None-Match", cacheItem.ETag);
 			}
 			
-
 			var response = await _rtClient.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 			
 			stopwatch.Stop();
@@ -438,6 +439,18 @@ public class RTClientCommentsCrawler
 			if (response.StatusCode == HttpStatusCode.TooManyRequests)
 			{
 				Log.Error($"Rate limited with request: {url}, {modifiedEndpointWithQuery}");
+				
+				var stringBuilder = new StringBuilder();
+				stringBuilder.AppendLine($"{guid} GetAPIRequest: response code {((int)response.StatusCode)} - {url}");
+				foreach (var header in response.Headers)
+				{
+					stringBuilder.AppendLine($"{header.Key} - {string.Join(", ", header.Value)}");
+				}
+
+				var pageResponse = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+				stringBuilder.AppendLine(pageResponse);
+				Log.Error(stringBuilder.ToString());
+				
 				await Task.Delay(65 * 1000);
 			}
 			else if (response.StatusCode == HttpStatusCode.NotModified)
@@ -493,11 +506,6 @@ public class RTClientCommentsCrawler
 				return (false, (int)response.StatusCode, default(TResponse));
 			}
 			
-			foreach (var header in response.Headers)
-			{
-				Log.Information($"{header.Key} - {string.Join(", ", header.Value)}");
-			}
-
 			using (var memoryStream = new MemoryStream())
 			{
 				using (var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
