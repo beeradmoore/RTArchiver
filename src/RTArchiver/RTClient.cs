@@ -1745,12 +1745,12 @@ public class RTClient
 				var video = videosResponse.Items[0];
 				var videoId = video.Id;
 
+				}
+				
 				Log.Information($"VideoId: {videoId}");
-				/*
+				
 				try
 				{
-
-
 					var downloadUrl = video.Links?.Download ?? string.Empty;
 					if (string.IsNullOrEmpty(downloadUrl))
 					{
@@ -1762,7 +1762,6 @@ public class RTClient
 					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({videoId}).mkv";
 					var tempOutputPath = Path.Combine(tempPath, tempOutputFile);
 
-					var outputFile = $"{videoId}.mkv";
 					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
 
 					if (Path.Exists(outputPath))
@@ -1791,14 +1790,28 @@ public class RTClient
 					}
 					else
 					{
-						throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n");
+						}
+						
+						processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+						if (processResults.ExitCode == 0)
+						{
+							var fileInfo = new FileInfo(tempOutputPath);
+							if (fileInfo.Length == 0)
+							{
+								throw new Exception($"File {tempOutputPath} is 0 bytes, not moving.");
+							}
+							File.Move(tempOutputPath, outputPath);
+						}
+						else
+						{
+							throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n");
+						}
 					}
 				}
 				catch (Exception err)
 				{
 					Log.Error(err, $"Could not download video ID {videoId}, {jsonFile}");
 				}
-				*/
 			}
 		});
 	}
