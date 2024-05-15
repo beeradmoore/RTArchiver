@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Web;
 using RTArchiver.Data;
 using RTArchiver.Data.Responses;
@@ -15,6 +16,7 @@ namespace RTArchiver;
 public class RTClientCommentsCrawler
 {
 	RTClient _rtClient;
+	int _episodeLimit;
 
 	static object _dictionaryLock = new object();
 
@@ -26,9 +28,10 @@ public class RTClientCommentsCrawler
 	ConcurrentBag<string> _episodesToFetch = new ConcurrentBag<string>();
 
 	
-	public RTClientCommentsCrawler(RTClient rtClient)
+	public RTClientCommentsCrawler(RTClient rtClient, int episodeLimit)
 	{
 		_rtClient = rtClient;
+		_episodeLimit = episodeLimit;
 		
 		// main video
 		// https://comments.roosterteeth.com/api/v2/topics/{episode_uuid}/comments
@@ -42,14 +45,31 @@ public class RTClientCommentsCrawler
 	{
 		Log.Information($"Starting: RTClientCommentsCrawler with {_rtClient.NumberOfThreads} threads.");
 
-		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1"), "episodes_page-*.json", SearchOption.TopDirectoryOnly);
-   
+		var episodeNumberRegex = new Regex(@"episodes_page\-(?<number>\d*)\.json");
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1"), "episodes_page-*.json", SearchOption.TopDirectoryOnly).ToList();
+		jsonFiles.Sort((a, b) =>
+		{
+			var fileNameA = Path.GetFileName(a);
+			var fileNameB = Path.GetFileName(b);
+			
+			var matchA = episodeNumberRegex.Match(fileNameA);
+			var matchB = episodeNumberRegex.Match(fileNameB);
+			
+			var numberA = int.Parse(matchA.Groups["number"].Value);
+			var numberB = int.Parse(matchB.Groups["number"].Value);
+			return numberA.CompareTo(numberB);
+		});
 		var parallelOptions = new ParallelOptions()
 		{
-		   	MaxDegreeOfParallelism = 4,
+		   	MaxDegreeOfParallelism = _rtClient.NumberOfThreads,
 		};
+
+		// If we are doing an episode limit we want to only use 1 thread so we only parse 1 episode page at a time.
+		if (_episodeLimit > 0)
+		{
+			parallelOptions.MaxDegreeOfParallelism = 1;
+		}
 		
-		   		
 		//https://comments.roosterteeth.com/api/v2/topics/{episode_uuid}/comments?per_page=100&page=1
 
 		var tempList = new List<string>();
@@ -58,6 +78,11 @@ public class RTClientCommentsCrawler
 		
 		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
 		{
+			if (_episodeLimit > 0 && tempList.Count > _episodeLimit)
+			{
+				return;
+			}
+
 			EpisodesResponse? episodesResponse = null;
 			using (var fileStream = File.OpenRead(jsonFile))
 			{
@@ -76,12 +101,23 @@ public class RTClientCommentsCrawler
 					return;
 				}
 			}
-
+			
+			
 			lock (listLock)
 			{
 				foreach (var episode in episodesResponse.Data)
 				{
-					tempList.Add(episode.Uuid);
+					if (_episodeLimit > 0)
+					{
+						if (tempList.Count < _episodeLimit)
+						{
+							tempList.Add(episode.Uuid);
+						}
+					}
+					else
+					{
+						tempList.Add(episode.Uuid);
+					}
 				}
 			}
 		});

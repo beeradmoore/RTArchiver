@@ -75,7 +75,11 @@ class Program
 		downloadCommand.AddCommand(downloadSitemapsCommand);
 		
 		var downloadCommentsCommand = new Command("comments", "Downloads all comments for current api cache.");
-		downloadCommentsCommand.SetHandler(DownloadCommentsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		var downloadCommentsLimitOption = new Option<int>(new string[] { "--limit" }, () => -1, "Sets how many of the latest episodes to iterate over.");
+		var downloadCommentsLoopOption = new Option<bool>(new string[] { "--loop" }, () => false, "Loop over the episodes to fetch the latest.");
+		downloadCommentsCommand.AddOption(downloadCommentsLimitOption);
+		downloadCommentsCommand.AddOption(downloadCommentsLoopOption);
+		downloadCommentsCommand.SetHandler(DownloadCommentsAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption, downloadCommentsLimitOption, downloadCommentsLoopOption);
 		downloadCommand.AddCommand(downloadCommentsCommand);
 		
 		var downloadBadgesCommand = new Command("badges", "Downloads site badges.");
@@ -325,7 +329,7 @@ class Program
 		return 0;
 	}
 	
-	static async Task<int> DownloadCommentsAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	static async Task<int> DownloadCommentsAsync(string globalOutputPath, int globalThreads, bool globalUseCache, int episodeLimit, bool loop)
 	{
 		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
 		if (setupClientResult != 0)
@@ -333,11 +337,14 @@ class Program
 			return setupClientResult;
 		}
 
-		var rtClientCommentsCrawler = new RTClientCommentsCrawler(_rtClient);
-		await rtClientCommentsCrawler.StartAndWaitAsync();
+		do
+		{
+			var rtClientCommentsCrawler = new RTClientCommentsCrawler(_rtClient, episodeLimit);
+			await rtClientCommentsCrawler.StartAndWaitAsync();
 
-		var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
-		await rtClientUsersCrawler.StartAndWaitAsync();
+			var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
+			await rtClientUsersCrawler.StartAndWaitAsync();
+		} while (loop);
 
 		return 0;
 	}
