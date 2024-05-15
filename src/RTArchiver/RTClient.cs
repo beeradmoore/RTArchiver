@@ -1797,6 +1797,13 @@ public class RTClient
 					}
 					else
 					{
+						// Probably a 403, try the other download link.
+						downloadUrl = video.Attributes?.Url ?? string.Empty;
+						if (string.IsNullOrEmpty(downloadUrl))
+						{
+							Log.Error($"Download error for video {episode.Attributes.Slug} was empty.");
+							Debugger.Break();
+							return;
 						}
 						
 						processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
