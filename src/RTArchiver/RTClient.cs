@@ -1745,6 +1745,14 @@ public class RTClient
 				var video = videosResponse.Items[0];
 				var videoId = video.Id;
 
+				
+				
+				
+				var outputFile = $"{videoId}.mkv";
+				var outputPath = Path.Combine(Storage.VideosPath, outputFile);
+				if (File.Exists(outputPath))
+				{
+					return;
 				}
 				
 				Log.Information($"VideoId: {videoId}");
@@ -1762,7 +1770,6 @@ public class RTClient
 					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({videoId}).mkv";
 					var tempOutputPath = Path.Combine(tempPath, tempOutputFile);
 
-					var outputPath = Path.Combine(Storage.VideosPath, outputFile);
 
 					if (Path.Exists(outputPath))
 					{
