@@ -130,9 +130,15 @@ public class RTClientUsersCrawler
 		{
 			++count;
 			Log.Information($"{count} / {length}");
-			try
+			
+			var ownerDirectory = Path.Combine(Storage.UsersPath, ownerUuid);
+			if (Directory.Exists(ownerDirectory) && Directory.GetFiles(ownerDirectory).Length > 0)
 			{
-				var ownerDirectory = Path.Combine(Storage.UsersPath, ownerUuid);
+				return;
+			}
+			
+			try
+			{			
 				if (Directory.Exists(ownerDirectory) == false)
 				{
 					Directory.CreateDirectory(ownerDirectory);
