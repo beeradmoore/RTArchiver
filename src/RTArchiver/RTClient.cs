@@ -1243,8 +1243,14 @@ public class RTClient
 				}
 				
 				// TODO: Probably should check if the image can be loaded.
-
-				File.Move(tempPath, finalPath);
+				try
+				{
+					File.Move(tempPath, finalPath, true);
+				}
+				catch (UnauthorizedAccessException )
+				{
+					// NOOP - another process is likely moving the file.
+				}
 			}
 			catch (HttpRequestException err) when (err.StatusCode == HttpStatusCode.NotFound)
 			{
