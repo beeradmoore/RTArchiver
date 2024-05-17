@@ -344,8 +344,8 @@ class Program
 			var rtClientCommentsCrawler = new RTClientCommentsCrawler(_rtClient, episodeLimit);
 			await rtClientCommentsCrawler.StartAndWaitAsync();
 
-			var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
-			await rtClientUsersCrawler.StartAndWaitAsync();
+			//var rtClientUsersCrawler = new RTClientUsersCrawler(_rtClient);
+			//await rtClientUsersCrawler.StartAndWaitAsync();
 		} while (loop);
 
 		return 0;
