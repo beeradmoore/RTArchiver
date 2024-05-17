@@ -248,6 +248,10 @@ public class RTClient
 			return (false, 0, default(TResponse));
 		}
 		
+		// There is no more server, don't try use the server.
+		return (false, 0, default(TResponse));
+		
+		/*		
 		var modifiedEndpointWithQuery = (string.IsNullOrWhiteSpace(modifiedQueryArguments) ? modifiedEndpoint : $"{modifiedEndpoint}?{modifiedQueryArguments}");
 		Log.Verbose($"{guid} - {stopwatch.ElapsedMilliseconds} - before request");
 
@@ -368,15 +372,6 @@ public class RTClient
 				{
 					Log.Error(err, $"Could not save request to disk, {fullCacheFileName}");
 				}
-#if DEBUG
-				/*
-				// Helps debug a specific endpoint as plaintext.
-				if (endpoint.Contains("shows", StringComparison.InvariantCultureIgnoreCase))
-				{
-					//Debugger.Break();
-				}
-				*/
-#endif
 				
 				memoryStream.Position = 0;
 				try
@@ -399,6 +394,7 @@ public class RTClient
 				}
 			}
 		}
+		*/
 	}
 	
 	
