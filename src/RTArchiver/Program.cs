@@ -188,11 +188,13 @@ class Program
 			UseCache = globalUseCache,
 		};
 		
+		/*
 		var didAuthenticate = await Authenticate();
 		if (didAuthenticate == false)
 		{
 			return 1;
 		}
+		*/
 
 		return 0;
 	}
