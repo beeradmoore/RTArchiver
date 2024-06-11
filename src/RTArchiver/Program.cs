@@ -179,6 +179,9 @@ class Program
 
 	static async Task<int> SetupClientAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
 	{
+		// compatability
+		await Task.Delay(1);
+		
 		Log.Information("~~ Rooster Teeth Archiver ~~");
 		Storage.Init(globalOutputPath);
 		

@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Runtime.InteropServices.JavaScript;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
@@ -149,6 +151,9 @@ public class RTClient
 	
 	async Task<(bool Success, int StatusCode, TResponse? Response)> GetAPIRequest<TResponse>(string endpoint, int page = 1, bool useAuth = true, CancellationToken cancellationToken = default(CancellationToken))
 	{
+		// compatability
+		await Task.Delay(1);
+		
 		var guid = Guid.NewGuid().ToString("D");
 		var stopwatch = new Stopwatch();
 		stopwatch.Start();
@@ -408,7 +413,7 @@ public class RTClient
 			return (false, 0, 0, new List<T>());
 		}
 
-		Log.Information($"GetPaginatedAPIRequest: {endpoint}");
+		//Log.Information($"GetPaginatedAPIRequest: {endpoint}");
 		
 		var retries = 0;
 		var maxRetries = 5;
@@ -1500,6 +1505,504 @@ public class RTClient
 
 	public async Task PlaygroundAsync()
 	{
+
+
+
+		/*
+		var logText = File.ReadAllText("/Volumes/Storage/RT Archive/logs/rt_archiver_20240515.log");
+		var videoFilesPath= Directory.GetFiles(Storage.VideosPath, "*.mkv", SearchOption.TopDirectoryOnly);
+		foreach (var videoFilePath in videoFilesPath)
+		{
+			var videoFileId = Path.GetFileNameWithoutExtension(videoFilePath);
+			int count = Regex.Matches(logText, videoFileId).Count;
+			if (count == 0)
+			{
+				Log.Information($"|{videoFileId}| not found");
+			}
+			else if (count == 1)
+			{
+				Log.Information($"|{videoFileId}| found once. Moving.");
+				var videoFile = Path.GetFileName(videoFilePath);
+				var newPath = Path.Combine("/Volumes/Storage/RT Archive/videos_done", videoFile);
+				File.Move(videoFilePath, newPath);
+			}
+			else
+			{
+				Log.Information($"|{videoFileId}| found {count} times");
+			}
+			//Debugger.Break();
+		}
+		*/
+
+
+		/*
+
+
+		var missingVideosJson = Path.Combine(Storage.LogsPath, "missing_videos.json");
+		var missingVideos = new Dictionary<string, MissingVideo>();
+		using (var fileStream = File.OpenRead(missingVideosJson))
+		{
+			var tempMissingVideos = JsonSerializer.Deserialize<Dictionary<string, MissingVideo>>(fileStream);
+			if (tempMissingVideos is not null && tempMissingVideos.Keys.Count > 0)
+			{
+				missingVideos = tempMissingVideos;
+			}
+		}
+
+		var parallelOptions = new ParallelOptions()
+		{
+			#if DEBUG
+			MaxDegreeOfParallelism = 1,
+			#else
+			MaxDegreeOfParallelism = NumberOfThreads,
+			#endif
+		};
+		var tempPath = Path.Combine(Storage.TempPath, $"rt-archiver-{Guid.NewGuid().ToString("D")}");
+
+		var frozenDictionary = missingVideos.ToFrozenDictionary();
+
+		await Parallel.ForEachAsync(frozenDictionary.Keys, parallelOptions, async (outputFile, state) =>
+		{
+			var logGuid = Guid.NewGuid().ToString("D");
+			var missingVideo = frozenDictionary[outputFile];
+			var outputPath = Path.Combine(Storage.VideosPath, outputFile);
+
+			//var videoId = video.Id;
+
+			if (File.Exists(outputPath))
+			{
+				return;
+			}
+
+			var videoId = outputFile.Replace(".mkv", string.Empty, StringComparison.OrdinalIgnoreCase);
+			Log.Information($"{logGuid}: VideoId: {videoId}");
+
+
+			try
+			{
+				for (int i = 0; i < missingVideo.DownloadUrls.Count; ++i)
+				{
+					var downloadUrl = missingVideo.DownloadUrls[i];
+					Log.Information($"{logGuid}: Attempting download {i} with {downloadUrl}");
+
+					if (string.IsNullOrEmpty(downloadUrl))
+					{
+						Log.Error($"{logGuid}: Video download path was null or empty.");
+						continue;
+					}
+
+					var tempOutputFile = $"{Guid.NewGuid().ToString("D")}_({videoId}).mkv";
+					var tempOutputPath = Path.Combine(tempPath, tempOutputFile);
+
+					//--retries 2
+					var processResults = await ProcessEx.RunAsync("yt-dlp", $"--merge-output-format mkv --fragment-retries 2 --embed-subs --sub-langs all --write-description --no-progress --write-info-json --part --concurrent-fragments 8 --check-formats \"{downloadUrl}\" -o \"{tempOutputPath}\"");
+
+					var shouldLog = false;
+
+					if (processResults.ExitCode != 0)
+					{
+						shouldLog = true;
+					}
+
+					if (shouldLog == false)
+					{
+						foreach (var line in processResults.StandardOutput)
+						{
+							if (line.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+							    line.Contains("403", StringComparison.OrdinalIgnoreCase))
+							{
+								shouldLog = true;
+								break;
+							}
+						}
+					}
+
+					if (shouldLog == false)
+					{
+						foreach (var line in processResults.StandardError)
+						{
+							if (line.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+							    line.Contains("403", StringComparison.OrdinalIgnoreCase))
+							{
+								shouldLog = true;
+								break;
+							}
+						}
+					}
+
+					if (shouldLog)
+					{
+						var stringBuilder = new StringBuilder();
+						stringBuilder.AppendLine("\n");
+						stringBuilder.AppendLine($"{outputFile} - {processResults.ExitCode}");
+						stringBuilder.AppendLine("OUT:");
+						stringBuilder.AppendLine(string.Join('\n', processResults.StandardOutput));
+						stringBuilder.AppendLine("ERR:");
+						stringBuilder.AppendLine(string.Join('\n', processResults.StandardError));
+						stringBuilder.AppendLine("\n");
+						Log.Error($"{logGuid}: " + stringBuilder.ToString());
+					}
+
+					if (processResults.ExitCode == 0)
+					{
+						var fileInfo = new FileInfo(tempOutputPath);
+						if (fileInfo.Length == 0)
+						{
+							throw new Exception($"{logGuid}: File {tempOutputPath} is 0 bytes, not moving.");
+						}
+						File.Move(tempOutputPath, outputPath);
+						return;
+					}
+				}
+			}
+			catch (Exception err)
+			{
+				Log.Error(err, $"{logGuid}: Could not download video {outputFile}");
+			}
+
+			Log.Error($"{logGuid}: No urls downloaded a valid video, {outputFile}");
+		});
+		*/
+
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "*.json", SearchOption.TopDirectoryOnly);
+
+
+		var parallelOptions = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = NumberOfThreads,
+		};
+
+		//var missingVideos = new Dictionary<string, MissingVideo>();
+		var allVideos = new Dictionary<int, MissingVideo>();
+		var missingVideosLock = new object();
+		await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
+		{
+			using (var fileStream = File.OpenRead(jsonFile))
+			{
+				var episodesResponse = await JsonSerializer.DeserializeAsync<EpisodesResponse>(fileStream, cancellationToken: state);
+
+				if (episodesResponse is null)
+				{
+					Log.Error($"episodesResponse was null");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Data.Count == 0)
+				{
+					Log.Error($"Zero episodes found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Data.Count > 1)
+				{
+					Log.Error($"More than 1 episodes found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Data[0].Type != "episode" &&
+				    episodesResponse.Data[0].Type != "bonus_feature")
+				{
+					Log.Error($"Invalid episode type: {episodesResponse.Data[0].Type}");
+					Debugger.Break();
+					return;
+				}
+
+				var episode = episodesResponse.Data[0];
+
+				BonusFeature? bonusFeature = null;
+				if (episodesResponse.Data[0].Type == "bonus_feature")
+				{
+					fileStream.Position = 0;
+					var bonusFeatureResponse = await JsonSerializer.DeserializeAsync<BonusFeaturesResponse>(fileStream, cancellationToken: state);
+
+					if (bonusFeatureResponse is null)
+					{
+						Log.Error($"bonusFeatureResponse was null");
+						Debugger.Break();
+						//return;
+					}
+					else if (bonusFeatureResponse.Data.Count == 0)
+					{
+						Log.Error($"Zero bonus Features found - {jsonFile}");
+						Debugger.Break();
+						//return;
+					}
+					else if (bonusFeatureResponse.Data.Count > 1)
+					{
+						Log.Error($"More than 1 bonusFeatureResponse found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+					else
+					{
+						bonusFeature = bonusFeatureResponse.Data[0];
+					}
+				}
+
+				if (string.IsNullOrEmpty(episode.Links.Videos))
+				{
+					Log.Error($"Videos link is null or empty for episode {episode.Attributes.Slug} ({episode.Links.Videos}).");
+					Debugger.Break();
+					return;
+				}
+
+				var videosResponse = await GetPaginatedAPIRequest<Video, VideosResponse>(episode.Links.Videos, state);
+				if (videosResponse.Success == false)
+				{
+					Log.Error($"videosResponse was not successful ({episode.Links.Videos})");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Items.Count == 0)
+				{
+					Log.Error($"Zero videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+
+				if (videosResponse.Items.Count > 1)
+				{
+					Log.Error($"More than 1 videos found - {jsonFile}");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Items[0].Type != "video")
+				{
+					Log.Error($"Invalid video type: {episodesResponse.Data[0].Type}");
+					Debugger.Break();
+					return;
+				}
+
+				var video = videosResponse.Items[0];
+				var videoId = video.Id;
+
+				var videoFile = $"{videoId}.mkv";
+
+
+				var measuredLength = -1.0;
+				var videoExists = false;
+				var videoPath = Path.Combine(Storage.VideosPath, videoFile);
+				if (File.Exists(videoPath) == false)
+				{
+					Log.Error($"Video does not exist, ({jsonFile})");
+				}	
+				else
+				{
+					videoExists = true;
+					try
+					{
+						var processResults = await ProcessEx.RunAsync("ffprobe", $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"");
+						if (processResults.ExitCode == 0)
+						{
+							var measuredLengthString = string.Join("\n", processResults.StandardOutput).Trim();
+							if (double.TryParse(measuredLengthString, out double tempMeasuredLength) == true)
+							{
+								measuredLength = tempMeasuredLength;
+								Log.Information($"{videoFile} - {tempMeasuredLength}");
+							}
+							else
+							{
+								throw new Exception($"Could not read length of {measuredLengthString} ({jsonFile})");
+							}
+						}
+						else
+						{
+							throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n({jsonFile})");
+						}
+					}
+					catch (Exception err)
+					{
+						Log.Error(err, $"Failed to detect length for video {videoFile} not detect length ({jsonFile})");
+					}
+				}
+
+			
+				
+
+				lock (missingVideosLock)
+				{
+
+					if (allVideos.ContainsKey(videoId) == false)
+					{
+						allVideos.Add(videoId, new MissingVideo()
+						{
+							VideoId = videoId.ToString(),
+							Title = episode.Attributes.Title,
+							PageUrl = $"https://roosterteeth.com/watch/{episode.Attributes.Slug}",
+							DisplayTitle = episode.Attributes.DisplayTitle,
+							ShowTitle = episode.Attributes.ShowTitle,
+							ChannelSlug = episode.Attributes.ChannelSlug,
+							ShowSlug = episode.Attributes.ShowSlug,
+							EpisodeSlug = episode.Attributes.Slug,
+							ParentSlug = bonusFeature?.Attributes.ParentContentSlug ?? string.Empty,
+							ParentTitle = bonusFeature?.Attributes.ParentContentTitle ?? string.Empty,
+							ParentType = bonusFeature?.Attributes.ParentContentType ?? string.Empty,
+							OriginalAirDate = episode.Attributes.OriginalAirDate,
+							Length = episode.Attributes.Length,
+							MeasuredLength = measuredLength,
+							VideoExists = videoExists,
+						});
+
+						allVideos[videoId].DownloadUrls.Add(video.Links?.Download ?? string.Empty);
+						allVideos[videoId].DownloadUrls.Add(video.Attributes?.Url ?? string.Empty);
+					}
+
+					//if (missingVideos.ContainsKey(outputFile) == false)
+					//{
+					//	missingVideos.Add(outputFile, new MissingVideo()
+					//	{
+					//		VideoId = videoId.ToString(),
+					//		Title = episode.Attributes.Title,
+					//		PageUrl = $"https://roosterteeth.com/watch/{episode.Attributes.Slug}",
+					//		DisplayTitle = episode.Attributes.DisplayTitle,
+					//		ShowTitle = episode.Attributes.ShowTitle,
+					//		ChannelSlug = episode.Attributes.ChannelSlug,
+					//		ShowSlug = episode.Attributes.ShowSlug,
+					//		EpisodeSlug = episode.Attributes.Slug,
+					//		OriginalAirDate = episode.Attributes.OriginalAirDate,
+					//		Length = episode.Attributes.Length,
+					//	});
+					//}
+				}
+
+				//Log.Information($"VideoId: {videoId}");
+
+				//lock (missingVideosLock)
+				//{
+				//	missingVideos[outputFile].DownloadUrls.Add(video.Links?.Download ?? string.Empty);
+				//	missingVideos[outputFile].DownloadUrls.Add(video.Attributes?.Url ?? string.Empty);
+				//}
+			}
+		});
+
+		//var missingVideosJsonPath = Path.Combine(Storage.LogsPath, "missing_videos.json");
+		var allVideosJsonPath = Path.Combine(Storage.LogsPath, "all_videos.json");
+		using (var fileStream = File.Create(allVideosJsonPath))
+		{
+			//JsonSerializer.Serialize<Dictionary<string, MissingVideo>>(fileStream, missingVideos, new JsonSerializerOptions() { WriteIndented = true });
+			JsonSerializer.Serialize<Dictionary<int, MissingVideo>>(fileStream, allVideos, new JsonSerializerOptions() { WriteIndented = true });
+		}
+
+		/*
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "videos_page-1.json", SearchOption.AllDirectories);
+
+		var parallelOptons = new ParallelOptions()
+		{
+			MaxDegreeOfParallelism = NumberOfThreads,
+		};
+		await Parallel.ForEachAsync(jsonFiles, parallelOptons, async (jsonFile, state) =>
+		{
+			using (var fileStream = File.OpenRead(jsonFile))
+			{
+				var videosResponse = await JsonSerializer.DeserializeAsync<VideosResponse>(fileStream);
+
+				if (videosResponse is null)
+				{
+					Log.Error($"videosResponse was null ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+
+				if (videosResponse.Data.Count == 0)
+				{
+					Log.Error($"Zero videos found ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				if (videosResponse.Data.Count > 1)
+				{
+					Log.Error($"More than 1 videos found ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				var video = videosResponse.Data[0];
+
+
+				var videoFile = $"{video.Id}.mkv";
+				var videoPath = Path.Combine(Storage.VideosPath, videoFile);
+				if (File.Exists(videoPath) == false)
+				{
+					Log.Error($"Video {videoFile} does not exist. ({jsonFile})");
+					return;
+				}
+
+				if (string.IsNullOrEmpty(video.Links.Content))
+				{
+					Log.Error($"Content link is null or empty for video {video.Id}. ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				var episodesResponse = await GetPaginatedAPIRequest<Episode, EpisodesResponse>(video.Links.Content);
+				if (episodesResponse.Success == false)
+				{
+					Log.Error($"episodesResponse was not successful ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Items.Count == 0)
+				{
+					Log.Error($"Zero episodes found ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				if (episodesResponse.Items.Count > 1)
+				{
+					Log.Error($"More than 1 episodes found ({jsonFile})");
+					Debugger.Break();
+					return;
+				}
+
+				var episode = episodesResponse.Items[0];
+
+				var expectedLength = episode.Attributes.Length;
+				if (expectedLength <= 0)
+				{
+					Log.Error($"Expected length is less than or equal to zero ({expectedLength}) ({jsonFile})");
+					return;
+				}
+
+				try
+				{
+					var processResults = await ProcessEx.RunAsync("ffprobe", $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"");
+					if (processResults.ExitCode == 0)
+					{
+						var measuredLengthString = string.Join("\n", processResults.StandardOutput).Trim();
+						if (double.TryParse(measuredLengthString, out double measuredLength) == true)
+						{
+							var withinTen = (Math.Abs(expectedLength - measuredLength) < 10) ? "success" : $"fail - ({jsonFile})";
+							Log.Information($"{videoFile} - {expectedLength} - {measuredLength} - {withinTen}");
+						}
+						else
+						{
+							throw new Exception($"Could not read length of {measuredLengthString} ({jsonFile})");
+						}
+					}
+					else
+					{
+						throw new Exception($"Exit code was {processResults.ExitCode}.\n\n{string.Join("\n", processResults.StandardOutput)}\n\n{string.Join("\n", processResults.StandardError)}\n\n({jsonFile})");
+					}
+				}
+				catch (Exception err)
+				{
+					Log.Error(err, $"Failed to detect length for video {videoFile} not detect length ({jsonFile})");
+				}
+			}
+		});
+		*/
+
+		/*
 		var channels = await GetChannels();
 		var shows = await GetShows();
 
@@ -1508,7 +2011,7 @@ public class RTClient
 		channels.Sort();
 
 		Show? show = null;
-		
+
 		foreach (var channel in channels)
 		{
 			//CreateCleanFileName(channel.Name);
@@ -1529,23 +2032,25 @@ public class RTClient
 			{
 				break;
 			}
-			/*
-			tempShows.Sort();
-
-			foreach (var show in tempShows)
-			{
-				CreateCleanFileName(show.Title);
-
-				Log.Information($" - {show.Title}");
-			}
 			*/
-			
 
-			//Log.Information("\n");
+		/*
+		tempShows.Sort();
 
+		foreach (var show in tempShows)
+		{
+			CreateCleanFileName(show.Title);
+
+			Log.Information($" - {show.Title}");
+		}
+		*/
+
+
+		//Log.Information("\n");
+		/*
 
 		}
-		
+
 		if (show == null)
 		{
 			return;
@@ -1581,7 +2086,7 @@ public class RTClient
 					var slug = bonusFeature.Attributes.Slug;
 
 					var goLiveAt = DateTime.Parse(bonusFeature.Attributes.MemberGoLiveAt);
-					var goLiveAtString = TimeZoneInfo.ConvertTime(goLiveAt, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago")); 
+					var goLiveAtString = TimeZoneInfo.ConvertTime(goLiveAt, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago"));
 
 					var videoResponse = await GetAPIRequest<VideosResponse>(bonusFeature.Links.Videos);
 					if (videoResponse.Success == false || videoResponse.Response is null || videoResponse.Response?.Data.Count != 1)
@@ -1589,18 +2094,18 @@ public class RTClient
 						Debugger.Break();
 						continue;
 					}
-					
+
 					var video = videoResponse.Response.Data[0];
 					//x-ray-and-vav-bonus-3
 					var bonusFeatureOutput = Path.Combine(specialsPath, $"{bonusFeature.Attributes.SortNumber:0000}-{bonusFeature.Attributes.Slug}-({video.Id})");
 
-					
+
 					Debugger.Break();
 
-				
+
 				}
-				
-				
+
+
 
 
 			}
@@ -1609,9 +2114,9 @@ public class RTClient
 		}
 		// /api/v1/shows/x-ray-and-vav/bonus_features
 		// /api/v1/shows/x-ray-and-vav/seasons?order=asc&order_by=number
-		
+
 		Debugger.Break();
-		
+		*/
 
 		/*
 
