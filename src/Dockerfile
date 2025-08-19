@@ -1,6 +1,11 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine3.19-amd64 AS build-env
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-alpine3.19 AS build-env
 
 WORKDIR /app
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 #ARG DEBIAN_FRONTEND=noninteractive
 #ENV TZ=Australia/Melbourne
@@ -17,19 +22,24 @@ WORKDIR /app
 # Copy everything
 COPY RTArchiver/ ./
 # Restore as distinct layers
-RUN dotnet restore
+RUN dotnet restore --arch x64
 # Build and publish a release
-RUN dotnet publish -c Release -o out
+RUN dotnet publish --arch x64 -c Release -o out
 
 
 # Build runtime image
-FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine3.19-amd64
+FROM --platform=$TARGETPLATFORM mcr.microsoft.com/dotnet/runtime:8.0-alpine3.19
 
 WORKDIR /app
 
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT false
+
 RUN apk update && \
     apk upgrade && \
-    apk add ffmpeg libva-intel-driver libva-utils intel-media-driver && \
+    apk add imagemagick icu-libs tzdata ffmpeg libva-intel-driver libva-utils intel-media-driver && \
     apk add python3 curl
 
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/bin/yt-dlp && \

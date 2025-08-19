@@ -118,7 +118,11 @@ class Program
 		var playgroundCommand = new Command("playground", "Easy entry point to test different code");
 		playgroundCommand.SetHandler(PlaygroundAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
 		rootCommand.Add(playgroundCommand);
-		
+
+		var plexCommand = new Command("plex", "Organise files for plex");
+		plexCommand.SetHandler(PlexAsync, globalOutputOption, globalThreadsOption, globalUseCacheOption);
+		rootCommand.Add(plexCommand);
+
 		
 		
 		//rootCommand.SetHandler(RunAsync, outputOption);
@@ -396,6 +400,19 @@ class Program
 		return 0;
 	}
 	
+	static async Task<int> PlexAsync(string globalOutputPath, int globalThreads, bool globalUseCache)
+	{
+		var setupClientResult = await SetupClientAsync(globalOutputPath, globalThreads, globalUseCache);
+		if (setupClientResult != 0)
+		{
+			return setupClientResult;
+		}
+
+		await _rtClient.PlexAsync();
+
+
+		return 0;
+	}
 	
 
 	static async Task<bool> Authenticate()

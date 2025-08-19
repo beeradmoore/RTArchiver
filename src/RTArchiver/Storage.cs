@@ -20,6 +20,8 @@ public class Storage
 
 	public static string BadgesPath { get; private set; } = string.Empty;
 
+	public static string PlexPath { get; private set; } = string.Empty;
+	
 	public static void Init(string archiveCachePath)
 	{
 		// This is really just dud code, it causes the system to setup the folders we actually use for logging.
@@ -41,6 +43,7 @@ public class Storage
 		var usersPath = Path.Combine(archivePath, "users");
 		var commentsPath = Path.Combine(archivePath, "comments");
 		var badgesPath = Path.Combine(archivePath, "badges");
+		var plexPath = Path.Combine(archivePath, "plex");
 		
 		try
 		{
@@ -110,6 +113,12 @@ public class Storage
 				Directory.CreateDirectory(badgesPath);
 			}
 			
+			if (Directory.Exists(plexPath) == false)
+			{
+				Log.Information($"Creating plex directory {plexPath}");
+				Directory.CreateDirectory(plexPath);
+			}
+			
 			Log.Logger = new LoggerConfiguration()
 				.WriteTo.Console(outputTemplate: "{Message:ij}{NewLine}{Exception}")
 				.WriteTo.Debug()
@@ -127,6 +136,7 @@ public class Storage
 			UsersPath = usersPath;
 			CommentsPath = commentsPath;
 			BadgesPath = badgesPath;
+			PlexPath = plexPath;
 			
 			Log.Information($"Using archive directory {archivePath}");
 			Log.Information($"Using cache directory {cachePath}");
@@ -139,6 +149,7 @@ public class Storage
 			Log.Information($"Using users directory {usersPath}");
 			Log.Information($"Using comments directory {commentsPath}");
 			Log.Information($"Using badges directory {badgesPath}");
+			Log.Information($"Using plex directory {plexPath}");
 		}
 		catch (Exception err)
 		{

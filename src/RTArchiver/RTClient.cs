@@ -10,6 +10,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
 using System.Xml.Serialization;
+using CliWrap;
+using CliWrap.Buffered;
+using ImageMagick;
 using RTArchiver.Data;
 using RTArchiver.Data.Requests;
 using RTArchiver.Data.Responses;
@@ -17,6 +20,7 @@ using RTArchiver.Extensions;
 using RunProcessAsTask;
 using Serilog;
 using SQLite;
+using Image = RTArchiver.Data.Image;
 
 namespace RTArchiver;
 
@@ -2135,6 +2139,671 @@ public class RTClient
 
 	}
 
+
+	bool ResizeShowCoverForPlex(string inputPath, string outputPath, int newWidth)
+	{
+		try
+		{
+			using (var image = new MagickImage(inputPath))
+			{
+				float aspectRatio = (float)image.Width / image.Height;
+				int newHeight = (int)(newWidth / aspectRatio);
+
+				image.Resize(newWidth, newHeight);
+
+				// Save the image as a JPG
+				image.Format = MagickFormat.Jpg;
+				image.Quality = 75;
+				image.Write(outputPath);
+			}
+
+			return true;
+		}
+		catch (Exception err)
+		{
+			Log.Error($"Could not load image {inputPath}. ({err.Message})");
+			return false;
+		}
+	}
+
+	async Task<bool> CreateHardSymbolicLink(string sourceFile, string targetFile)
+	{
+		try
+		{
+			if (File.Exists(targetFile) == true)
+			{
+				throw new Exception("Cannot create symbolic link from source to target. Target already exists.");
+			}
+
+			if (File.Exists(sourceFile) == false)
+			{
+				throw new Exception("Cannot create symbolic link from source to target. Source does not exists.");
+			}
+			
+			await Cli.Wrap("ln")
+				.WithArguments(new string[] { sourceFile, targetFile })
+				.ExecuteBufferedAsync();
+
+			return true;
+		}
+		catch (Exception err)
+		{
+			Log.Error($"CreateHardSymbolicLink, {sourceFile}, {targetFile}, {err.Message}");
+			return false;
+		}
+	}
+	
+	public async Task PlexAsync()
+	{
+		
+		/*
+		Regex cleanTitleRegex2 = new Regex(@"([^a-zA-Z0-9#_,\-()\[\]! .])", RegexOptions.Compiled);
+
+		var cleanTitle = "Hard News 12/11/12 - The_PS3. Tank MLP Online Gets Shut Down and Bit.Trip Saga on eShop. #27";
+		cleanTitle = cleanTitle.Replace("\"", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\\", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("/", "-", StringComparison.OrdinalIgnoreCase);
+	
+		cleanTitle = cleanTitleRegex2.Replace(cleanTitle, string.Empty);
+
+		Debugger.Break();
+		*/
+		
+
+		var channels = await GetChannels();
+		var shows = await GetShows();
+
+		channels.Sort();
+		shows.Sort();
+
+		foreach (var channel in channels)
+		{
+			var channelPath = Path.Combine(Storage.PlexPath, channel.Slug);
+			if (Directory.Exists(channelPath) == false)
+			{
+				Directory.CreateDirectory(channelPath);
+			}
+
+			foreach (var show in shows)
+			{
+				if (show.Attributes.ChannelSlug == channel.Slug)
+				{
+					var showPath = Path.Combine(channelPath, show.Slug);
+					if (Directory.Exists(showPath) == false)
+					{
+						Directory.CreateDirectory(showPath);
+					}
+					
+					var showInfoPath = Path.Combine(showPath, "show.info");
+					if (File.Exists(showInfoPath) == false)
+					{
+						var plexShow = Plex.Show.FromRTShow(show);
+						await File.WriteAllTextAsync(showInfoPath, plexShow.ToString());
+					}
+				}
+			}
+		}
+		
+		var jsonFiles = Directory.GetFiles(Path.Combine(Storage.CachePath, "api", "v1", "watch"), "*.json", SearchOption.TopDirectoryOnly);
+
+
+		var parallelOptions = new ParallelOptions()
+		{
+			#if DEBUG
+			MaxDegreeOfParallelism = NumberOfThreads,
+			#else
+			MaxDegreeOfParallelism = NumberOfThreads,
+			#endif
+		};
+		
+		var csvFile = Path.Combine(Storage.CachePath, "all_episodes.csv");
+			
+		/*
+		if (image.Type == "show_image")
+		{
+			downloadDirectory = Path.Combine(showDirectory);
+		}
+		else if (episode.Type == "episode")
+		{ 
+			downloadDirectory = Path.Combine(showDirectory, episode.Attributes.SeasonSlug, episode.Attributes.Slug);
+		}
+		else if (episode.Type == "bonus_feature" && bonusFeature is not null)
+		{
+			downloadDirectory = Path.Combine(showDirectory, "bonus_feature", episode.Attributes.Slug);
+			//Debugger.Break();
+		}
+		*/
+
+		
+		
+
+		var csvLock = new object();
+		var imageIOLock = new object();
+		//using (var csvFileStream = File.Create(csvFile))
+		{
+			//using (var csvFileStreamWriter = new StreamWriter(csvFileStream))
+			{
+				//csvFileStreamWriter.WriteLine($"type,channel-slug,show-slug,season-slug,season-id,season-number,title");
+
+				
+				await Parallel.ForEachAsync(jsonFiles, parallelOptions, async (jsonFile, state) =>
+				{
+					Episode? episode = null;
+					BonusFeature? bonusFeature = null;
+
+					using (var fileStream = File.OpenRead(jsonFile))
+					{
+						var episodesResponse = await JsonSerializer.DeserializeAsync<EpisodesResponse>(fileStream, cancellationToken: state);
+
+
+						if (episodesResponse is null)
+						{
+							Log.Error($"episodesResponse was null");
+							Debugger.Break();
+							return;
+						}
+
+						if (episodesResponse.Data.Count == 0)
+						{
+							Log.Error($"Zero episodes found - {jsonFile}");
+							//Debugger.Break();
+							return;
+						}
+
+						if (episodesResponse.Data.Count > 1)
+						{
+							Log.Error($"More than 1 episodes found - {jsonFile}");
+							Debugger.Break();
+							return;
+						}
+
+						// TEMP FOR DEBUG
+						/*
+						if (episodesResponse.Data[0].Attributes.ShowSlug != "x-ray-and-vav")
+						{
+							return;
+						}
+						*/
+
+						if (episodesResponse.Data[0].Type == "episode")
+						{
+							episode = episodesResponse.Data[0];
+						}
+						else if (episodesResponse.Data[0].Type == "bonus_feature")
+						{
+							fileStream.Position = 0;
+							var bonusFeatureResponse = await JsonSerializer.DeserializeAsync<BonusFeaturesResponse>(fileStream, cancellationToken: state);
+
+							if (bonusFeatureResponse is null)
+							{
+								Log.Error($"bonusFeatureResponse was null");
+								Debugger.Break();
+								return;
+							}
+							else if (bonusFeatureResponse.Data.Count == 0)
+							{
+								Log.Error($"Zero bonus Features found - {jsonFile}");
+								Debugger.Break();
+								return;
+							}
+							else if (bonusFeatureResponse.Data.Count > 1)
+							{
+								Log.Error($"More than 1 bonusFeatureResponse found - {jsonFile}");
+								Debugger.Break();
+								return;
+							}
+							else
+							{
+								bonusFeature = bonusFeatureResponse.Data[0];
+							}
+						}
+						else
+						{
+							Log.Error($"Invalid episode type: {episodesResponse.Data[0].Type}");
+							Debugger.Break();
+							return;
+						}
+					}
+
+					if (episode is not null && bonusFeature is not null)
+					{
+						Debugger.Break();
+						return;
+					}
+
+					if (episode is null && bonusFeature is null)
+					{
+						Debugger.Break();
+						return;
+					}
+
+					(bool Success, int Pages, int LastStatusCode, List<Video> Items) videosResponse = new(false, 0, 0, new List<Video>());
+
+					if (bonusFeature?.Id == 1404)
+					{
+						//Debugger.Break();
+					}
+					var cleanTitle = string.Empty;
+					var showPath = string.Empty;
+					var imageShowPath = string.Empty;
+					//lock (csvLock)
+					{
+						if (episode is not null)
+						{
+							/*
+							if (episode.Attributes.Title != episode.Attributes.DisplayTitle)
+							{
+								Debugger.Break();
+							}
+							*/
+							
+							//cleanTitle = GenerateCleanTitle(episode.Attributes.Title);
+							cleanTitle = GenerateFilename(episode);
+							
+							//var filename = (episode);
+							/*
+							if (string.IsNullOrEmpty(cleanTitle))
+							{
+								Debugger.Break();
+							}
+							*/
+							if (string.IsNullOrEmpty(episode.Links.Videos))
+							{
+								Log.Error($"Videos link is null or empty for episode {episode.Attributes.Slug} ({episode.Links.Videos}).");
+								Debugger.Break();
+								return;
+							}
+							
+							videosResponse = await GetPaginatedAPIRequest<Video, VideosResponse>(episode.Links.Videos, state);
+							showPath = Path.Combine(Storage.PlexPath, episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug);
+							imageShowPath = Path.Combine(Storage.ImagesPath, episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug);
+							/*
+							// Used for testing invalid characters.
+							if (episode.Attributes.Title != cleanTitle)
+							{
+								var tempTitle = episode.Attributes.Title;
+								foreach (var character in cleanTitle)
+								{
+									tempTitle = tempTitle.Replace($"{character}", string.Empty, StringComparison.OrdinalIgnoreCase);
+								}
+
+								foreach (var badCharacter in knownBadCharacters)
+								{
+									tempTitle = tempTitle.Replace(badCharacter, string.Empty, StringComparison.OrdinalIgnoreCase);
+								}
+
+								if (string.IsNullOrEmpty(tempTitle) == false)
+								{
+									csvFileStreamWriter.WriteLine($"{cleanTitle},{episode.Attributes.Title},{tempTitle}");
+									csvFileStreamWriter.Flush();
+								}
+							}
+							*/
+							//
+
+							//csvFileStreamWriter.WriteLine(filename);
+							//csvFileStreamWriter.WriteLine($"episode,{episode.Attributes.ChannelSlug},{episode.Attributes.ShowSlug},{episode.Attributes.SeasonSlug},{episode.Attributes.SeasonId},{episode.Attributes.SeasonNumber},{episode.Attributes.Number},\"{episodeTitle}\"");
+						}
+						else if (bonusFeature is not null)
+						{
+							/*
+							if (bonusFeature.Attributes.Title != bonusFeature.Attributes.DisplayTitle)
+							{
+								Debugger.Break();
+							}
+							*/
+
+							try
+							{
+								var bonusShow = shows.Single(s => s.Uuid == bonusFeature.Attributes.ShowId);
+
+								//cleanTitle = GenerateCleanTitle(bonusFeature.Attributes.Title);
+								cleanTitle = GenerateFilename(bonusFeature);
+								
+								if (string.IsNullOrEmpty(cleanTitle))
+								{
+									Debugger.Break();
+								}
+								showPath = Path.Combine(Storage.PlexPath, bonusFeature.Attributes.ChannelSlug, bonusShow.Slug);
+								imageShowPath = Path.Combine(Storage.ImagesPath, bonusFeature.Attributes.ChannelSlug, bonusShow.Slug);
+								videosResponse = await GetPaginatedAPIRequest<Video, VideosResponse>(bonusFeature.Links.Videos, state);
+								
+								/*
+								// Used for testing invalid characters.
+								if (bonusFeature.Attributes.Title != cleanTitle)
+								{
+
+									var tempTitle = bonusFeature.Attributes.Title;
+									foreach (var character in cleanTitle)
+									{
+										tempTitle = tempTitle.Replace($"{character}", string.Empty, StringComparison.OrdinalIgnoreCase);
+									}
+
+									foreach (var badCharacter in knownBadCharacters)
+									{
+										tempTitle = tempTitle.Replace(badCharacter, string.Empty, StringComparison.OrdinalIgnoreCase);
+									}
+
+									if (string.IsNullOrEmpty(tempTitle) == false)
+									{
+										csvFileStreamWriter.WriteLine($"{cleanTitle},{bonusFeature.Attributes.Title},{tempTitle}");
+										csvFileStreamWriter.Flush();
+									}
+								}
+								*/
+								
+								//var filename = GenerateFilename(bonusFeature);
+
+								//csvFileStreamWriter.WriteLine(filename);
+								//var episodeTitle = bonusFeature.Attributes.Title.Replace("\"", "\"\"", StringComparison.OrdinalIgnoreCase);
+								//csvFileStreamWriter.WriteLine($"bonus_feature,{bonusFeature.Attributes.ChannelSlug},{bonusShow.Attributes.Slug},,,,{bonusFeature.Attributes.Number},\"{episodeTitle}\"");
+							}
+							catch (Exception err)
+							{
+								// For some reason this one episode does not have a show.
+								if (bonusFeature.Attributes.ShowId != "e174b490-b5c0-40fb-af9b-8bfe74dcd411")
+								{
+									Log.Error(err, $"Could not find show for bonus feature {bonusFeature.Attributes.Title}");
+									Debugger.Break();
+								}
+								return;
+							}
+						}
+					}
+
+					if (string.IsNullOrEmpty(cleanTitle) == true)
+					{
+						Log.Error("Was not able to generate clean title.");
+						return;
+					}
+					
+					if (string.IsNullOrEmpty(showPath) == true)
+					{
+						Log.Error("Was not able to generate showPath.");
+						return;
+					}
+
+					
+					if (videosResponse.Success == false)
+					{
+						Log.Error($"videosResponse was not successful ({jsonFile})");
+						Debugger.Break();
+						return;
+					}
+
+					if (videosResponse.Items.Count == 0)
+					{
+						Log.Error($"Zero videos found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+
+
+					if (videosResponse.Items.Count > 1)
+					{
+						Log.Error($"More than 1 videos found - {jsonFile}");
+						Debugger.Break();
+						return;
+					}
+
+					if (videosResponse.Items[0].Type != "video")
+					{
+						Log.Error($"Invalid video type: {videosResponse.Items[0].Type}");
+						Debugger.Break();
+						return;
+					}
+
+					var video = videosResponse.Items[0];
+					var videoId = video.Id;
+
+					var videoFile = $"{videoId}.mkv";
+
+					// TODO: 
+					// Create symlink for video
+					// create symlink for images for show
+					// create symilnk for images for episode
+					
+					//showPath
+					//cleanTitle
+					
+					var images = new List<Image>();
+					
+
+					var seasonOutputPath = string.Empty;
+					
+					if (episode is not null)
+					{
+						seasonOutputPath = Path.Combine(showPath, $"Season {episode.Attributes.SeasonNumber.ToString("00")}");
+						images.AddRange(episode.Included.Images);
+					}
+
+					if (bonusFeature is not null)
+					{
+						seasonOutputPath = Path.Combine(showPath, $"Specials");
+						images.AddRange(bonusFeature.Included.Images);
+					}
+
+					lock (_diskIOLock)
+					{
+						if (Directory.Exists(seasonOutputPath) == false)
+						{
+							Directory.CreateDirectory(seasonOutputPath);
+						}
+					}
+
+					var episodeInfo = Path.Combine(seasonOutputPath, $"{cleanTitle}.info");
+					if (File.Exists(episodeInfo) == false)
+					{
+						if (episode is not null)
+						{
+							var plexEpisode = Plex.Episode.FromRTEpisode(episode);
+							await File.WriteAllTextAsync(episodeInfo, plexEpisode.ToString());
+						}
+						else if (bonusFeature is not null)
+						{
+							var plexEpisode = Plex.Episode.FromRTBonusFeature(bonusFeature);
+							await File.WriteAllTextAsync(episodeInfo, plexEpisode.ToString());
+						}
+					}
+					
+
+					if (images.Count == 0)
+					{
+						Log.Error($"No images found - {jsonFile}");
+						return;
+					}
+
+					Image? bestShowImage = null;
+					Image? bestEpisodeImage = null;
+					foreach (var image in images)
+					{
+						if (image.Type == "show_image")
+						{
+							if (image.Attributes.ImageType == "poster")
+							{
+								if (bestShowImage != null)
+								{
+									Log.Error($"Duplicate show image found. {jsonFile}");
+									//Debugger.Break();
+								}
+
+								bestShowImage = image;
+							}
+						}
+						else if (image.Type == "episode_image" || image.Type == "bonus_feature_image")
+						{
+							if (image.Attributes.ImageType == "profile")
+							{
+								if (bestEpisodeImage != null)
+								{
+									Log.Error($"Duplicate episode image found. {jsonFile}");
+									//Debugger.Break();
+								}
+
+								bestEpisodeImage = image;
+							}
+						}
+						else
+						{
+							Debugger.Break();
+						}
+					}
+
+					
+
+					if (bestEpisodeImage is null || bestShowImage is null)
+					{
+						Debugger.Break();
+						Log.Error($"bestEpisodeImage or bestShowImage is null., {jsonFile}");
+						return;
+					}
+
+					var showImagePath = Path.Combine(showPath, "show.jpg");
+					lock (imageIOLock)
+					{
+						if (File.Exists(showImagePath) == false)
+						{
+							var originalPosterImage = string.Empty;
+							var largePosterPrefix = $"{bestShowImage.Type}_{bestShowImage.Attributes.ImageType}_{bestShowImage.Attributes.Orientation}_large";
+							foreach (var posterImage in Directory.GetFiles(imageShowPath))
+							{
+								var posterImageName = Path.GetFileName(posterImage);
+								if (posterImageName.StartsWith(largePosterPrefix))
+								{
+									originalPosterImage = posterImage;
+									break;
+								}
+							}
+
+							if (string.IsNullOrEmpty(originalPosterImage) == false)
+							{
+								ResizeShowCoverForPlex(originalPosterImage, showImagePath, 800);
+							}
+							else
+							{
+								Log.Error($"Could not find a originalPosterImage, {jsonFile}");
+							}
+						}
+					}
+
+					var episodeSeasonPath = string.Empty;
+					
+					if (episode is not null)
+					{
+						episodeSeasonPath = Path.Combine(imageShowPath, episode.Attributes.SeasonSlug, episode.Attributes.Slug);
+					}
+					else if (bonusFeature is not null)
+					{
+						episodeSeasonPath = Path.Combine(imageShowPath, "bonus_feature", bonusFeature.Attributes.Slug);
+						//imageShowPath = Path.Combine(Storage.ImagesPath, episode.Attributes.ChannelSlug, episode.Attributes.ShowSlug);
+
+						
+						//downloadDirectory = Path.Combine(showDirectory, "bonus_feature", episode.Attributes.Slug);
+					}
+					
+					
+					var episodeImagePath = Path.Combine(seasonOutputPath, $"{cleanTitle}.jpg");
+					if (File.Exists(episodeImagePath) == false)
+					{
+						
+						var originalEpisodeImage = string.Empty;
+						var largePosterPrefix = $"{bestEpisodeImage.Type}_{bestEpisodeImage.Attributes.ImageType}_{bestEpisodeImage.Attributes.Orientation}_large";
+						
+						//var episodeImagePath = Path.Combine(episodeSeasonPath, episode.)
+						foreach (var posterImage in Directory.GetFiles(episodeSeasonPath))
+						{
+							var posterImageName = Path.GetFileName(posterImage);
+							if (posterImageName.StartsWith(largePosterPrefix))
+							{
+								originalEpisodeImage = posterImage;
+								break;
+							}
+						}
+						
+						if (string.IsNullOrEmpty(originalEpisodeImage) == false)
+						{
+							ResizeShowCoverForPlex(originalEpisodeImage, episodeImagePath, 1920);
+							//Debugger.Break();
+						}
+						else
+						{
+							Log.Error($"Could not find a originalEpisodeImage, {jsonFile}");
+						}
+					}
+
+					var inputVideoFile = Path.Combine(Storage.VideosPath, videoFile);
+					var outputVideoFile = Path.Combine(seasonOutputPath, $"{cleanTitle}.mkv");
+					if (File.Exists(outputVideoFile) == false)
+					{
+						var result = await CreateHardSymbolicLink(inputVideoFile, outputVideoFile);
+						if (result)
+						{
+							Log.Information($"Created {outputVideoFile}");
+						}
+					}
+				});
+			}
+		}
+
+	}
+
+	string GenerateFilename(Episode episode)
+	{
+		var cleanTitle = GenerateCleanTitle(episode.Attributes.Title);
+		return $"S{episode.Attributes.SeasonNumber:00}E{episode.Attributes.Number:00} - {cleanTitle}";
+	}
+
+	string GenerateFilename(BonusFeature bonusFeature)
+	{
+		var cleanTitle = GenerateCleanTitle(bonusFeature.Attributes.Title);
+		return $"S00E{bonusFeature.Attributes.Number:00} - {cleanTitle}";
+	}
+
+	// Used to remove unwanted characters from filenames.
+	Regex cleanTitleRegex = new Regex(@"([^a-zA-Z0-9#_,\-&()\[\]é$ç;=~@öə+âíÜÃ¤尚©èá¡àüýäá池ë™ãōÖ°Æ^êóū€%ÌÄåñ'! .])", RegexOptions.Compiled);
+
+	// For testing unwanted characters
+	/*
+	List<string> knownBadCharacters = new List<string>()
+	{
+		"*", "?", "\"", "|", ":", "’", "/", "•", "“", "”", "‘", "-", "–", "…", "\u00a0", "ʻ", "\uFEFF", "\u2060", "<3",
+		"\t", "\u2503", "\u200b", @"¯\ツ¯"
+	};
+	*/
+	
+	string GenerateCleanTitle(string title)
+	{
+		var cleanTitle = title;
+		
+		// Clena characters manually
+		cleanTitle = cleanTitle.Replace(@"¯\ツ¯", "~shrug~", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\"", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace(" w/ ", " with ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\\", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("/", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("—", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("–", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("ʻ", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("‘", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("’", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("“", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("”", "'", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("•", "-", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("…", "...", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace(" <3 ", " love ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace(" < 3 ", " love ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\u00a0", " ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\u200b", string.Empty, StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\uFEFF", " ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\u2060", " ", StringComparison.OrdinalIgnoreCase);
+		cleanTitle = cleanTitle.Replace("\t", " ", StringComparison.OrdinalIgnoreCase);	
+		cleanTitle = cleanTitle.Replace("\u2503", "-", StringComparison.OrdinalIgnoreCase);	
+		
+		// then clena from regex
+		cleanTitle = cleanTitleRegex.Replace(cleanTitle, string.Empty);
+		
+		return cleanTitle;
+	}
 	
 	public async Task DownloadVideosAsync()
 	{

@@ -145,6 +145,7 @@ public class BonusFeature_Links
 
 public class BonusFeature_Included
 {
+	[JsonPropertyName("images")]
 	public List<Image> Images { get; set; } = new List<Image>();
 }
 
